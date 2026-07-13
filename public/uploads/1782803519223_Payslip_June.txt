@@ -1,0 +1,19 @@
+
+HCM.ai Tech Solutions - Payslip
+================================
+Month: June
+Date: 2026-06-30
+Status: Paid
+
+Earnings:
+- Basic: $6,000
+- HRA: $1,200
+- Allowance: $500
+- Bonus: $300
+
+Deductions:
+- Provident Fund: -$400
+- Tax: -$300
+
+Net Pay: $7,300
+    

@@ -1,0 +1,1 @@
+const http = require('http'); const req = http.request('http://localhost:5000/api/hr/terminate', { method: 'POST', headers: {'Content-Type': 'application/json'} }, res = let data = ''; res.on('data', c ==c); res.on('end', () =, data)); }); req.write(JSON.stringify({employeeId: 'invalid', reason: 'test', lastWorkingDay: '2026-10-10'})); req.end();  

@@ -1,0 +1,18 @@
+{
+  "taxRate": 10,
+  "pfRate": 12,
+  "baseSalaries": {
+    "superuser": 8000,
+    "admin": 6500,
+    "hr": 5500,
+    "manager": 6000,
+    "employee": 5000
+  },
+  "allowances": {
+    "superuser": 2000,
+    "admin": 1500,
+    "hr": 1200,
+    "manager": 1300,
+    "employee": 1000
+  }
+}

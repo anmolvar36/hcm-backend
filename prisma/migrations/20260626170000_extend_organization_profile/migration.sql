@@ -1,0 +1,9 @@
+ALTER TABLE `Organization`
+  ADD COLUMN `legalName` VARCHAR(191) NULL,
+  ADD COLUMN `websiteUrl` VARCHAR(191) NULL,
+  ADD COLUMN `industry` VARCHAR(191) NULL,
+  ADD COLUMN `companySize` VARCHAR(191) NULL,
+  ADD COLUMN `primaryEmail` VARCHAR(191) NULL,
+  ADD COLUMN `supportPhone` VARCHAR(191) NULL,
+  ADD COLUMN `timezone` VARCHAR(191) NULL,
+  ADD COLUMN `currency` VARCHAR(191) NULL;
