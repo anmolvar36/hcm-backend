@@ -482,8 +482,59 @@ const getBenefits = async (req, res, next) => {
       orderBy: { claimedAt: 'desc' },
     });
 
-    return res.status(200).json({ success: true, data: claims });
+    const enrolledPlans = await prisma.employeeBenefit.findMany({
+      where: { employeeId: profile.id },
+      include: { benefitPlan: true }
+    });
+
+    const availablePlans = await prisma.benefitPlan.findMany({
+      where: { status: 'Active' }
+    });
+
+    return res.status(200).json({ success: true, data: { claims, enrolledPlans, availablePlans } });
   } catch (err) { next(err); }
+};
+
+// ─────────────────────────────────────────
+// 13. ENROLL IN BENEFIT PLAN → POST /api/employee/benefits/enroll
+// ─────────────────────────────────────────
+const enrollBenefitPlan = async (req, res, next) => {
+  try {
+    const { benefitPlanId } = req.body;
+    if (!benefitPlanId) {
+      return res.status(400).json({ success: false, error: { code: 'MISSING_PARAM', message: 'benefitPlanId required' } });
+    }
+    const profile = await getOrCreateProfile(req.user.userId);
+    const plan = await prisma.benefitPlan.findUnique({ where: { id: benefitPlanId } });
+    if (!plan || plan.status !== 'Active') {
+      return res.status(404).json({ success: false, error: { code: 'PLAN_NOT_FOUND', message: 'Benefit plan not found or inactive' } });
+    }
+    const existing = await prisma.employeeBenefit.findFirst({ where: { employeeId: profile.id, benefitPlanId } });
+    if (existing) {
+      return res.status(400).json({ success: false, error: { code: 'ALREADY_ENROLLED', message: 'Already enrolled in this benefit' } });
+    }
+    const amount = parseFloat(plan.empContribution) || parseFloat(plan.contribution) || 0;
+    const [enrollment, deduction] = await prisma.$transaction([
+      prisma.employeeBenefit.create({
+        data: {
+          employeeId: profile.id,
+          benefitPlanId,
+          status: 'Active',
+        },
+      }),
+      prisma.employeeDeduction.create({
+        data: {
+          employeeId: profile.id,
+          benefitPlanId,
+          amount,
+          description: `Deduction for benefit ${plan.name}`,
+        },
+      }),
+    ]);
+    return res.status(201).json({ success: true, data: { enrollment, deduction } });
+  } catch (err) {
+    next(err);
+  }
 };
 
 const submitBenefitClaim = async (req, res, next) => {
@@ -749,5 +800,5 @@ module.exports = {
   getBenefits, submitBenefitClaim, getTasks,
   getHolidays, getAnnouncements,
   getDocuments, uploadDocument, deleteDocument,
-  submitResignation, getResignation
+  submitResignation, getResignation, enrollBenefitPlan
 };

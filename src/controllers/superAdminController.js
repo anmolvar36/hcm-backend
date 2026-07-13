@@ -200,7 +200,19 @@ const getAllPlatformUsers = async (req, res, next) => {
         isActive: true,
         createdAt: true,
         organization: { select: { name: true } },
-        employeeProfile: { select: { fullName: true, employeeId: true } },
+        employeeProfile: { 
+          select: { 
+            id: true,
+            fullName: true, 
+            employeeId: true,
+            compensationProfile: {
+              select: {
+                baseSalary: true,
+                monthlyCTC: true
+              }
+            }
+          } 
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -739,39 +751,57 @@ const updatePayrollSettings = async (req, res, next) => {
 
 const getPayrollHistory = async (req, res, next) => {
   try {
-    const payslips = await prisma.payslip.findMany({
+    const snapshots = await prisma.payrollSnapshot.findMany({
       include: {
         employee: {
           include: {
             user: true,
             department: true
           }
-        }
+        },
+        items: true
       },
       orderBy: { createdAt: 'desc' }
     });
 
-    const formatted = payslips.map(p => ({
-      id: p.id,
-      employeeId: p.employee.employeeId,
-      employeeName: p.employee.fullName,
-      department: p.employee.department?.name || 'N/A',
-      designation: p.employee.user.role.charAt(0).toUpperCase() + p.employee.user.role.slice(1).toLowerCase(),
-      basic: p.basic,
-      allowance: p.allowance,
-      bonus: p.bonus,
-      pf: p.pf,
-      tax: p.tax,
-      deductions: Math.max(0, Math.round(p.pf + p.tax - p.basic * 0.12)),
-      net: p.netPay,
-      month: p.month,
-      status: p.status,
-      date: p.paymentDate ? p.paymentDate.toISOString().split('T')[0] : p.createdAt.toISOString().split('T')[0],
-      attendancePresent: 22, // Mocked for now since attendance history might not be perfectly seeded
-      attendanceAbsent: 0,
-      leavesTaken: 0,
-      currency: p.currency
-    }));
+    const formatted = snapshots.map(p => {
+      let basic = 0;
+      let allowance = 0;
+      let pf = 0;
+      let tax = 0;
+
+      for (const item of p.items) {
+        if (item.code === 'BASE' || item.name.toLowerCase().includes('basic')) basic += item.amount;
+        else if (item.type === 'Earning' || item.type === 'Allowance') allowance += item.amount;
+        
+        if (item.name.toLowerCase().includes('provident fund') || item.code === 'PF') pf += item.amount;
+        if (item.code.startsWith('TAX_') || item.name.toLowerCase().includes('tax')) tax += item.amount;
+      }
+
+      if (basic === 0) basic = p.grossSalary;
+
+      return {
+        id: p.id,
+        employeeId: p.employeeId, // UUID for matching ungenerated users
+        displayId: p.employee?.employeeId, // EMP-XXX for UI
+        employeeName: p.employee?.fullName || 'System Employee',
+        department: p.employee?.department?.name || 'N/A',
+        designation: p.employee?.user?.role?.charAt(0).toUpperCase() + p.employee?.user?.role?.slice(1).toLowerCase() || 'Employee',
+        basic: basic,
+        allowance: allowance,
+        bonus: p.totalContributions || 0,
+        pf: pf,
+        tax: tax,
+        deductions: p.totalDeductions,
+        net: p.netSalary,
+        month: p.month,
+        status: p.status === 'Paid' ? 'Processed' : p.status,
+        date: p.paymentDate ? p.paymentDate.toISOString().split('T')[0] : p.createdAt.toISOString().split('T')[0],
+        attendancePresent: 22,
+        attendanceAbsent: 0,
+        leavesTaken: 0
+      };
+    });
 
     res.status(200).json({ success: true, data: formatted });
   } catch (err) { next(err); }

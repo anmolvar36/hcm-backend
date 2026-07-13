@@ -11,7 +11,7 @@ const {
   getLeaves, applyLeave, cancelLeave,
   getPayslips, getPerformance, updateGoalProgress, upsertSkill, deleteSkill,
   getTickets, createTicket, replyTicket, deleteTicketMessage,
-  getBenefits, submitBenefitClaim, getTasks,
+  getBenefits, submitBenefitClaim, enrollBenefitPlan, getTasks,
   getDocuments, uploadDocument, deleteDocument,
   getHolidays, getAnnouncements,
   submitResignation, getResignation

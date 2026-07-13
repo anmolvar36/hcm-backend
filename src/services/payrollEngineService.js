@@ -110,12 +110,18 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
       evaluatedAmount = Number(value);
       log(`Calculated [${comp.code}] as Fixed: ${evaluatedAmount}`);
     } else if (calcType === 'Percentage') {
-      const targetBaseKey = calcBase || '';
-      const baseVal = variables[targetBaseKey] || 
+      const targetBaseKey = calcBase || 'Basic';
+      let baseVal = variables[targetBaseKey] || 
                       variables[targetBaseKey.toUpperCase()] || 
                       variables[targetBaseKey.toLowerCase()] || 0;
+      
+      // Fallback if looking for Basic but not found (e.g. code is BASE)
+      if (targetBaseKey.toLowerCase() === 'basic' && !baseVal) {
+        baseVal = variables['BASE'] || variables['base'] || compensation?.baseSalary || 0;
+      }
+
       evaluatedAmount = (baseVal * Number(value)) / 100;
-      log(`Calculated [${comp.code}] as Percentage (${value}%) of ${calcBase} (${baseVal}): ${evaluatedAmount}`);
+      log(`Calculated [${comp.code}] as Percentage (${value}%) of ${targetBaseKey} (${baseVal}): ${evaluatedAmount}`);
     } else if (calcType === 'Formula') {
       evaluatedAmount = evaluateFormula(formula, variables);
       log(`Calculated [${comp.code}] via Formula (${formula}): ${evaluatedAmount}`);
@@ -180,6 +186,12 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
   }
   if (!variables.Basic && variables.basic) {
     variables.Basic = variables.basic;
+  }
+  if (!variables.Basic && variables.BASE) {
+    variables.Basic = variables.BASE;
+  }
+  if (!variables.Basic && variables.base) {
+    variables.Basic = variables.base;
   }
   if (!variables.Basic) {
     variables.Basic = compensation?.baseSalary || 0;
