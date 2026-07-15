@@ -11,10 +11,11 @@ const {
   getLeaves, applyLeave, cancelLeave,
   getPayslips, getPerformance, updateGoalProgress, upsertSkill, deleteSkill,
   getTickets, createTicket, replyTicket, deleteTicketMessage,
-  getBenefits, submitBenefitClaim, enrollBenefitPlan, getTasks,
+  getBenefits, submitBenefitClaim, enrollBenefitPlan, unenrollBenefitPlan, getTasks,
   getDocuments, uploadDocument, deleteDocument,
   getHolidays, getAnnouncements,
-  submitResignation, getResignation
+  submitResignation, getResignation,
+  getPolicies, acknowledgePolicy
 } = require('../controllers/employeeController');
 
 const {
@@ -53,6 +54,8 @@ router.post('/performance/skills', upsertSkill);
 router.delete('/performance/skills/:id', deleteSkill);
 router.get('/benefits', getBenefits);
 router.post('/benefits/claims', submitBenefitClaim);
+router.post('/benefits/enroll', enrollBenefitPlan);
+router.post('/benefits/unenroll', unenrollBenefitPlan);
 router.get('/tasks', getTasks);
 
 router.get('/tickets', getTickets);
@@ -66,5 +69,8 @@ router.get('/announcements', getAnnouncements);
 router.get('/documents', getDocuments);
 router.post('/documents', uploadDocument);
 router.delete('/documents/:id', deleteDocument);
+
+router.get('/policies', getPolicies);
+router.post('/policies/:id/acknowledge', acknowledgePolicy);
 
 module.exports = router;

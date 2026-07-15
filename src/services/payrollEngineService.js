@@ -200,20 +200,65 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
   variables.Base_Salary = variables.Basic;
 
   // Fetch active Deduction Rules for the organization
-  const deductionRules = await prisma.deductionRule.findMany({
+  const allDeductionRules = await prisma.deductionRule.findMany({
     where: { organizationId, status: 'Active' }
+  });
+
+  // Fetch active and unenrolled Employee Deductions for this employee
+  const employeeDeductions = await prisma.employeeDeduction.findMany({
+    where: { employeeId, status: { in: ['Active', 'Unenrolled'] } }
+  });
+
+  const activeOrPendingDeductions = employeeDeductions.filter(ed => {
+    if (ed.status === 'Active') return true;
+    if (ed.status === 'Unenrolled') {
+      const unenrollMonthIndex = ed.updatedAt.getMonth();
+      const unenrollYear = ed.updatedAt.getFullYear();
+      
+      const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+      let payrollMonthIndex = monthNames.indexOf(month);
+      let payrollYear = new Date().getFullYear();
+
+      if (payrollMonthIndex === -1 && month.includes('-')) {
+        const parts = month.split('-');
+        payrollYear = parseInt(parts[0], 10);
+        payrollMonthIndex = parseInt(parts[1], 10) - 1;
+      }
+      
+      if (payrollMonthIndex === -1) {
+         return true; // fallback
+      }
+
+      if (payrollYear < unenrollYear) return true;
+      if (payrollYear === unenrollYear && payrollMonthIndex <= unenrollMonthIndex) return true;
+      return false;
+    }
+    return false;
+  });
+
+  const mappedDeductionIds = activeOrPendingDeductions.map(ed => ed.deductionId);
+
+  // Filter rules: keep if it's not a benefit deduction OR if the employee has an active/pending mapping for it
+  const deductionRules = allDeductionRules.filter(rule => {
+    if (rule.code.startsWith('BENEFIT_')) {
+      return mappedDeductionIds.includes(rule.id);
+    }
+    return true; // Apply global rules like PF and Tax to everyone
   });
 
   for (const rule of deductionRules) {
     let evaluatedAmount = 0;
+    const mapping = employeeDeductions.find(ed => ed.deductionId === rule.id);
+    const ruleValue = (mapping && mapping.customValue) ? mapping.customValue : rule.value;
+
     if (rule.valueType === 'Fixed') {
-      evaluatedAmount = Number(rule.value || 0);
+      evaluatedAmount = Number(ruleValue || 0);
     } else if (rule.valueType === 'Percentage' || rule.valueType === 'Percentage of Basic') {
       const basicVal = variables.Basic || 0;
-      evaluatedAmount = (basicVal * Number(rule.value || 0)) / 100;
+      evaluatedAmount = (basicVal * Number(ruleValue || 0)) / 100;
     } else if (rule.valueType === 'Formula') {
       try {
-        evaluatedAmount = evaluateFormula(rule.value, variables);
+        evaluatedAmount = evaluateFormula(ruleValue, variables);
       } catch (err) {
         log(`Error evaluating deduction formula for ${rule.name}: ${err.message}`);
       }

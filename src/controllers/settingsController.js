@@ -21,7 +21,9 @@ const defaultSettings = {
   primaryModel: 'Google Gemini 1.5 Pro',
   resumeScanAutoRank: true,
   matchingThreshold: 75,
-  apiRateLimit: 1200
+  apiRateLimit: 1200,
+  reimbursementManagerApproval: true,
+  reimbursementFinalApprovalRole: 'ADMIN'
 };
 
 // GET /api/settings
@@ -71,6 +73,8 @@ const updateSettings = async (req, res, next) => {
     if (data.resumeScanAutoRank !== undefined) fieldsToUpdate.resumeScanAutoRank = data.resumeScanAutoRank;
     if (data.matchingThreshold !== undefined) fieldsToUpdate.matchingThreshold = data.matchingThreshold;
     if (data.apiRateLimit !== undefined) fieldsToUpdate.apiRateLimit = data.apiRateLimit;
+    if (data.reimbursementManagerApproval !== undefined) fieldsToUpdate.reimbursementManagerApproval = data.reimbursementManagerApproval;
+    if (data.reimbursementFinalApprovalRole !== undefined) fieldsToUpdate.reimbursementFinalApprovalRole = data.reimbursementFinalApprovalRole;
 
     const updated = await prisma.globalSettings.upsert({
       where: { id: 'global-settings' },

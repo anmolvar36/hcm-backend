@@ -748,8 +748,23 @@ const getPolicies = async (req, res, next) => {
 // POST /api/admin/policies
 const createPolicy = async (req, res, next) => {
   try {
+    const { name, category, department, owner, effectiveDate, expiryDate, version, requiresSignature, status, description, pdfName, pdfData, acknowledgments } = req.body;
     const policy = await prisma.policy.create({
-      data: req.body,
+      data: {
+        name,
+        category,
+        owner,
+        ...(department && { department }),
+        ...(effectiveDate && { effectiveDate }),
+        ...(expiryDate && { expiryDate }),
+        ...(version && { version }),
+        ...(requiresSignature !== undefined && { requiresSignature }),
+        ...(status && { status }),
+        ...(description && { description }),
+        ...(pdfName && { pdfName }),
+        ...(pdfData && { pdfData }),
+        ...(acknowledgments && { acknowledgments }),
+      },
     });
     return res.status(201).json({ success: true, data: policy, message: 'Policy created.' });
   } catch (err) { next(err); }
@@ -759,9 +774,24 @@ const createPolicy = async (req, res, next) => {
 const updatePolicy = async (req, res, next) => {
   try {
     const { id } = req.params;
+    const { name, category, department, owner, effectiveDate, expiryDate, version, requiresSignature, status, description, pdfName, pdfData, acknowledgments } = req.body;
     const policy = await prisma.policy.update({
       where: { id },
-      data: req.body,
+      data: {
+        ...(name && { name }),
+        ...(category && { category }),
+        ...(department && { department }),
+        ...(owner && { owner }),
+        ...(effectiveDate && { effectiveDate }),
+        ...(expiryDate && { expiryDate }),
+        ...(version && { version }),
+        ...(requiresSignature !== undefined && { requiresSignature }),
+        ...(status && { status }),
+        ...(description !== undefined && { description }),
+        ...(pdfName !== undefined && { pdfName }),
+        ...(pdfData !== undefined && { pdfData }),
+        ...(acknowledgments && { acknowledgments }),
+      },
     });
     return res.status(200).json({ success: true, data: policy, message: 'Policy updated.' });
   } catch (err) { next(err); }
@@ -790,6 +820,87 @@ const toggleArchivePolicy = async (req, res, next) => {
       data: { status: newStatus },
     });
     return res.status(200).json({ success: true, data: updated, message: `Policy marked as ${newStatus}.` });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/policies/:id/renew
+const renewPolicy = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { name, category, department, owner, effectiveDate, expiryDate, version, requiresSignature, description, pdfName, pdfData } = req.body;
+    
+    // Update the policy itself with new data
+    const policy = await prisma.policy.update({
+      where: { id },
+      data: {
+        ...(name && { name }),
+        ...(category && { category }),
+        ...(department && { department }),
+        ...(owner && { owner }),
+        ...(effectiveDate && { effectiveDate }),
+        ...(expiryDate && { expiryDate }),
+        ...(version && { version }),
+        ...(requiresSignature !== undefined && { requiresSignature }),
+        status: 'Active',
+        ...(description !== undefined && { description }),
+        ...(pdfName !== undefined && { pdfName }),
+        ...(pdfData !== undefined && { pdfData }),
+        // Reset acknowledgment string format (e.g. 0/50 instead of 45/50)
+        // We will just set it to '0' initially, frontend logic will format it to `0/totalEmployees`
+        acknowledgments: '0' 
+      },
+    });
+
+    // Wipe all existing employee acknowledgments for this policy
+    await prisma.policyAcknowledgment.deleteMany({
+      where: { policyId: id }
+    });
+
+    return res.status(200).json({ success: true, data: policy, message: 'Policy renewed successfully.' });
+  } catch (err) { next(err); }
+};
+
+// POST /api/admin/policies/:id/remind
+const sendPolicyReminder = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const policy = await prisma.policy.findUnique({ where: { id } });
+    if (!policy) {
+      return res.status(404).json({ success: false, error: { message: 'Policy not found.' } });
+    }
+
+    // Get all users who have not acknowledged this policy
+    const acknowledgedUsers = await prisma.policyAcknowledgment.findMany({
+      where: { policyId: id },
+      select: { userId: true }
+    });
+    
+    const ackUserIds = acknowledgedUsers.map(a => a.userId);
+    
+    // Find active employees who have NOT acknowledged it
+    const pendingUsers = await prisma.user.findMany({
+      where: {
+        role: 'EMPLOYEE',
+        status: 'ACTIVE',
+        id: { notIn: ackUserIds }
+      }
+    });
+
+    const { createNotification } = require('../utils/notificationHelper');
+    let sentCount = 0;
+    
+    for (const user of pendingUsers) {
+      await createNotification({
+        userId: user.id,
+        title: 'Action Required: Policy Acknowledgment',
+        message: `Please review and acknowledge the updated policy: ${policy.name}`,
+        type: 'WARNING',
+        link: '/employee/compliance'
+      });
+      sentCount++;
+    }
+
+    return res.status(200).json({ success: true, message: `Reminder sent to ${sentCount} employees.` });
   } catch (err) { next(err); }
 };
 
@@ -999,7 +1110,12 @@ const deleteHoliday = async (req, res, next) => {
 
 const getBenefitPlans = async (req, res, next) => {
   try {
-    const plans = await prisma.benefitPlan.findMany({ orderBy: { name: 'asc' } });
+    const plans = await prisma.benefitPlan.findMany({ 
+      orderBy: { name: 'asc' },
+      include: {
+        employeeBenefits: true
+      }
+    });
     return res.status(200).json({ success: true, data: plans });
   } catch (err) { next(err); }
 };
@@ -1338,7 +1454,10 @@ module.exports = {
   getAllUsers, createUser, changeUserRole, toggleUserActive, deleteUser,
   getAllPayslips, generatePayslip, markPayslipPaid,
   getAuditLogs,
-  getPolicies, createPolicy, updatePolicy, deletePolicy, toggleArchivePolicy,
+  getPolicies, createPolicy, updatePolicy, deletePolicy,
+  toggleArchivePolicy,
+  renewPolicy,
+  sendPolicyReminder,
   getRoles, createRole, updateRole, deleteRole,
   getHolidays, createHoliday, updateHoliday, deleteHoliday,
   getBenefitPlans, createBenefitPlan, updateBenefitPlan, deleteBenefitPlan,

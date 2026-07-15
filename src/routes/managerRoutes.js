@@ -14,7 +14,8 @@ const {
   getOrgEmployees, addTeamLeaveRequest,
   getTeamReviews, createTeamReview, updateTeamReview,
   getIncrementRequests, approveIncrementRequest, rejectIncrementRequest,
-  getResignations, reviewResignation
+  getResignations, reviewResignation,
+  getManagerReimbursements, reviewManagerReimbursement
 } = require('../controllers/managerController');
 
 // Only MANAGER (and ADMIN) can access these routes
@@ -47,5 +48,8 @@ router.patch('/increments/:id/reject', rejectIncrementRequest);
 
 router.get('/resignations', getResignations);
 router.patch('/resignations/:id', reviewResignation);
+
+router.get('/reimbursements', getManagerReimbursements);
+router.patch('/reimbursements/:id/review', reviewManagerReimbursement);
 
 module.exports = router;

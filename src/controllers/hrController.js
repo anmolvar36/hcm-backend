@@ -824,7 +824,7 @@ const reviewResignationHr = async (req, res, next) => {
         userId: exit.employee.userId,
         title: 'Resignation Rejected',
         message: `HR has rejected your resignation request.`,
-        type: 'ERROR',
+        type: 'WARNING',
         link: '/employee/dashboard'
       });
     }

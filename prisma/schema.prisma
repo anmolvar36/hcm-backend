@@ -159,6 +159,7 @@ model User {
   auditLogs        AuditLog[]
   documents        Document[]
   notifications    Notification[]
+  policyAcknowledgments PolicyAcknowledgment[]
 }
 
 // ============================================================
@@ -413,7 +414,29 @@ model BenefitClaim {
   title      String
   provider   String
   amount     Float
-  status     String          @default("Pending")
+  status               String          @default("Submitted")
+  
+  // Manager Approval Tracking
+  managerStatus        String          @default("Pending")
+  managerComment       String?         @db.Text
+  managerApprovedAt    DateTime?
+
+  // Final Approval Tracking
+  finalApprovalStatus  String          @default("Pending")
+  finalApproverId      String?
+  finalApproverRole    String?
+  finalApprovalComment String?         @db.Text
+  finalApprovedAt      DateTime?
+
+  // Payment Tracking
+  paymentStatus        String          @default("Pending")
+  paymentMethod        String?
+  paymentReference     String?
+  paymentDate          DateTime?
+
+  // Overall Workflow
+  overallStatus        String          @default("Submitted")
+  approvalHistory      String?         @db.LongText // JSON tracking timeline
 
   claimedAt  DateTime        @default(now())
 }
@@ -524,10 +547,26 @@ model Policy {
   status            PolicyStatus @default(Active)
   description       String?      @db.Text
   pdfName           String?
+  pdfData           String?      @db.LongText
   acknowledgments   String?
+  policyAcknowledgments PolicyAcknowledgment[]
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+}
+
+// ============================================================
+// 18b. Policy Acknowledgment Model
+// ============================================================
+model PolicyAcknowledgment {
+  id        String   @id @default(uuid())
+  policyId  String
+  policy    Policy   @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([policyId, userId])
 }
 
 // ============================================================
@@ -740,6 +779,10 @@ model GlobalSettings {
   resumeScanAutoRank  Boolean  @default(true)
   matchingThreshold   Int      @default(75)
   apiRateLimit        Int      @default(1200)
+
+  // Reimbursement Settings
+  reimbursementManagerApproval     Boolean @default(true)
+  reimbursementFinalApprovalRole   String  @default("ADMIN")
 
   updatedAt           DateTime @updatedAt
 }// ============================================================

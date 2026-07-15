@@ -866,7 +866,7 @@ const reviewResignation = async (req, res, next) => {
         userId: exit.employee.userId,
         title: 'Resignation Rejected',
         message: `Your resignation request was rejected by your manager.`,
-        type: 'ERROR',
+        type: 'WARNING',
         link: '/employee/dashboard'
       });
     }
@@ -875,8 +875,107 @@ const reviewResignation = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ─────────────────────────────────────────
+// 16. GET MANAGER REIMBURSEMENTS  →  GET /api/manager/reimbursements
+// ─────────────────────────────────────────
+const getManagerReimbursements = async (req, res, next) => {
+  try {
+    const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
+    if (!managerProfile) return res.status(404).json({ success: false, error: { message: 'Manager profile not found.' } });
+
+    const claims = await prisma.benefitClaim.findMany({
+      where: {
+        employee: { managerId: managerProfile.id }
+      },
+      include: {
+        employee: { select: { fullName: true, department: { select: { name: true } }, employeeId: true } }
+      },
+      orderBy: { claimedAt: 'desc' }
+    });
+
+    return res.status(200).json({ success: true, data: claims });
+  } catch (err) { next(err); }
+};
+
+// ─────────────────────────────────────────
+// 17. REVIEW MANAGER REIMBURSEMENT  →  PATCH /api/manager/reimbursements/:id/review
+// ─────────────────────────────────────────
+const reviewManagerReimbursement = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status, comment } = req.body; // status: 'Approved', 'Rejected'
+    
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Invalid status' } });
+    }
+
+    const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
+    if (!managerProfile) return res.status(404).json({ success: false, error: { message: 'Manager profile not found.' } });
+
+    const claim = await prisma.benefitClaim.findUnique({ where: { id }, include: { employee: true } });
+    if (!claim) return res.status(404).json({ success: false, error: { message: 'Claim not found.' } });
+    if (claim.employee.managerId !== managerProfile.id) {
+      return res.status(403).json({ success: false, error: { message: 'Not authorized to review this claim.' } });
+    }
+
+    const overallStatus = status === 'Approved' ? 'Pending Final Approval' : 'Rejected by Manager';
+    
+    let history = [];
+    if (claim.approvalHistory) {
+      try { history = JSON.parse(claim.approvalHistory); } catch(e) {}
+    }
+    history.push({
+      action: status === 'Approved' ? 'Manager Approved' : 'Manager Rejected',
+      actor: managerProfile.fullName,
+      date: new Date().toISOString(),
+      comment: comment || ''
+    });
+
+    const updatedClaim = await prisma.benefitClaim.update({
+      where: { id },
+      data: {
+        managerStatus: status,
+        managerComment: comment,
+        managerApprovedAt: new Date(),
+        overallStatus,
+        approvalHistory: JSON.stringify(history)
+      }
+    });
+
+    // Notification to Employee
+    await prisma.notification.create({
+      data: {
+        userId: claim.employee.userId,
+        type: 'INFO',
+        title: 'Reimbursement Claim Update',
+        message: `Your claim for ${claim.title} was ${status.toLowerCase()} by your manager.`,
+        isRead: false
+      }
+    });
+
+    // Notify final approvers if approved
+    if (status === 'Approved') {
+      const settings = await prisma.globalSettings.findUnique({ where: { id: 'global-settings' } });
+      const finalRole = settings ? settings.reimbursementFinalApprovalRole : 'ADMIN';
+      const finalApprovers = await prisma.user.findMany({ where: { role: finalRole } });
+      for (const approver of finalApprovers) {
+        await prisma.notification.create({
+          data: {
+            userId: approver.id,
+            type: 'INFO',
+            title: 'New Reimbursement Pending Final Approval',
+            message: `${claim.employee.fullName}'s claim for ${claim.title} requires your approval.`,
+            isRead: false
+          }
+        });
+      }
+    }
+
+    return res.status(200).json({ success: true, data: updatedClaim, message: `Claim ${status.toLowerCase()} successfully.` });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
-  getResignations, reviewResignation,
   getTeam, addTeamMember,
   getTeamLeaves, reviewLeave,
   assignTask, getTeamTasks, updateTask,
@@ -885,6 +984,7 @@ module.exports = {
   getOrgEmployees,
   addTeamLeaveRequest,
   getTeamReviews, createTeamReview, updateTeamReview,
-  getIncrementRequests, approveIncrementRequest, rejectIncrementRequest
+  getIncrementRequests, approveIncrementRequest, rejectIncrementRequest,
+  getResignations, reviewResignation,
+  getManagerReimbursements, reviewManagerReimbursement
 };
-

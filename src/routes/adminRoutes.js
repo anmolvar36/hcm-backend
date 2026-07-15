@@ -12,7 +12,7 @@ const {
   getAllUsers, createUser, changeUserRole, toggleUserActive, deleteUser,
   getAllPayslips, generatePayslip, markPayslipPaid,
   getAuditLogs,
-  getPolicies, createPolicy, updatePolicy, deletePolicy, toggleArchivePolicy,
+  getPolicies, createPolicy, updatePolicy, deletePolicy, toggleArchivePolicy, renewPolicy, sendPolicyReminder,
   getRoles, createRole, updateRole, deleteRole,
   getHolidays, createHoliday, updateHoliday, deleteHoliday,
   getBenefitPlans, createBenefitPlan, updateBenefitPlan, deleteBenefitPlan,
@@ -89,6 +89,8 @@ router.post('/policies', createPolicy);
 router.put('/policies/:id', updatePolicy);
 router.delete('/policies/:id', deletePolicy);
 router.patch('/policies/:id/archive', toggleArchivePolicy);
+router.post('/policies/:id/renew', renewPolicy);
+router.post('/policies/:id/remind', sendPolicyReminder);
 
 // Roles & Permissions
 router.get('/roles', getRoles);

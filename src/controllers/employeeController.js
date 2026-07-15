@@ -483,7 +483,7 @@ const getBenefits = async (req, res, next) => {
     });
 
     const enrolledPlans = await prisma.employeeBenefit.findMany({
-      where: { employeeId: profile.id },
+      where: { employeeId: profile.id, status: 'Active' },
       include: { benefitPlan: true }
     });
 
@@ -510,28 +510,111 @@ const enrollBenefitPlan = async (req, res, next) => {
       return res.status(404).json({ success: false, error: { code: 'PLAN_NOT_FOUND', message: 'Benefit plan not found or inactive' } });
     }
     const existing = await prisma.employeeBenefit.findFirst({ where: { employeeId: profile.id, benefitPlanId } });
-    if (existing) {
+    if (existing && existing.status === 'Active') {
       return res.status(400).json({ success: false, error: { code: 'ALREADY_ENROLLED', message: 'Already enrolled in this benefit' } });
     }
-    const amount = parseFloat(plan.empContribution) || parseFloat(plan.contribution) || 0;
-    const [enrollment, deduction] = await prisma.$transaction([
-      prisma.employeeBenefit.create({
-        data: {
-          employeeId: profile.id,
-          benefitPlanId,
-          status: 'Active',
-        },
-      }),
-      prisma.employeeDeduction.create({
-        data: {
-          employeeId: profile.id,
-          benefitPlanId,
-          amount,
-          description: `Deduction for benefit ${plan.name}`,
-        },
-      }),
-    ]);
-    return res.status(201).json({ success: true, data: { enrollment, deduction } });
+    const [enrollment] = await prisma.$transaction(async (tx) => {
+      let benefit;
+      if (existing) {
+        benefit = await tx.employeeBenefit.update({
+          where: { id: existing.id },
+          data: { status: 'Active' }
+        });
+      } else {
+        benefit = await tx.employeeBenefit.create({
+          data: {
+            employeeId: profile.id,
+            benefitPlanId,
+            status: 'Active',
+          },
+        });
+      }
+
+      const amount = parseFloat(plan.empContribution) || parseFloat(plan.contribution) || 0;
+      if (amount > 0) {
+        const ruleCode = `BENEFIT_${plan.id}`;
+        let deductionRule = await tx.deductionRule.findUnique({ where: { code: ruleCode } });
+        
+        if (!deductionRule) {
+          const user = await tx.user.findUnique({ where: { id: req.user.userId } });
+          const org = await tx.organization.findFirst({ where: user?.organizationId ? { id: user.organizationId } : undefined });
+          if (org) {
+            deductionRule = await tx.deductionRule.create({
+              data: {
+                organizationId: org.id,
+                name: `Benefit: ${plan.name}`,
+                code: ruleCode,
+                category: 'Benefit',
+                valueType: 'Fixed',
+                value: String(amount),
+                isPreTax: true,
+                status: 'Active',
+              }
+            });
+          }
+        }
+
+        if (deductionRule) {
+          const empDed = await tx.employeeDeduction.findFirst({
+            where: { employeeId: profile.id, deductionId: deductionRule.id }
+          });
+          if (empDed) {
+            await tx.employeeDeduction.update({
+              where: { id: empDed.id },
+              data: { status: 'Active', updatedAt: new Date() }
+            });
+          } else {
+            await tx.employeeDeduction.create({
+              data: {
+                employeeId: profile.id,
+                deductionId: deductionRule.id,
+                customValue: String(amount),
+                status: 'Active',
+                effectiveDate: new Date()
+              }
+            });
+          }
+        }
+      }
+
+      return [benefit];
+    });
+
+    return res.status(201).json({ success: true, data: { enrollment } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const unenrollBenefitPlan = async (req, res, next) => {
+  try {
+    const { benefitPlanId } = req.body;
+    if (!benefitPlanId) {
+      return res.status(400).json({ success: false, error: { code: 'MISSING_PARAM', message: 'benefitPlanId required' } });
+    }
+    const profile = await getOrCreateProfile(req.user.userId);
+    const plan = await prisma.benefitPlan.findUnique({ where: { id: benefitPlanId } });
+    if (!plan) {
+      return res.status(404).json({ success: false, error: { code: 'PLAN_NOT_FOUND', message: 'Benefit plan not found' } });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.employeeBenefit.updateMany({
+        where: { employeeId: profile.id, benefitPlanId },
+        data: { status: 'Unenrolled' }
+      });
+
+      const ruleCode = `BENEFIT_${plan.id}`;
+      const deductionRule = await tx.deductionRule.findUnique({ where: { code: ruleCode } });
+      if (deductionRule) {
+        await tx.employeeDeduction.updateMany({
+          where: { employeeId: profile.id, deductionId: deductionRule.id },
+          data: { status: 'Unenrolled' }
+        });
+      }
+    });
+
+    return res.status(200).json({ success: true, message: 'Unenrolled from benefit plan successfully' });
   } catch (err) {
     next(err);
   }
@@ -546,16 +629,52 @@ const submitBenefitClaim = async (req, res, next) => {
       return res.status(400).json({ success: false, error: { message: 'Type and amount are required' } });
     }
 
+    const settings = await prisma.globalSettings.findUnique({ where: { id: 'global-settings' } });
+    const requireManagerApproval = settings ? settings.reimbursementManagerApproval : true;
+    const overallStatus = requireManagerApproval ? 'Pending Manager Approval' : 'Pending Final Approval';
+    const managerStatus = requireManagerApproval ? 'Pending' : 'Not Required';
+
+    const approvalHistory = [
+      {
+        action: 'Submitted',
+        actor: profile.fullName,
+        date: new Date().toISOString(),
+        comment: 'Claim submitted by employee'
+      }
+    ];
+
     const claim = await prisma.benefitClaim.create({
       data: {
         employeeId: profile.id,
         title: type,
         provider: description || 'General',
         amount: parseFloat(amount) || 0,
-        status: 'Pending',
+        status: 'Pending', // Legacy status field kept for compatibility
+        managerStatus,
+        overallStatus,
+        approvalHistory: JSON.stringify(approvalHistory),
         claimedAt: date ? new Date(date) : new Date()
       }
     });
+
+    // Notify Manager if required
+    if (requireManagerApproval && profile.managerId) {
+      const managerUser = await prisma.employeeProfile.findUnique({
+        where: { id: profile.managerId },
+        select: { userId: true }
+      });
+      if (managerUser) {
+        await prisma.notification.create({
+          data: {
+            userId: managerUser.userId,
+            type: 'INFO',
+            title: 'New Reimbursement Claim',
+            message: `${profile.fullName} submitted a new claim for ${type}.`,
+            isRead: false
+          }
+        });
+      }
+    }
 
     return res.status(201).json({ success: true, data: claim, message: 'Claim submitted' });
   } catch (err) { next(err); }
@@ -791,6 +910,72 @@ const getResignation = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+const getPolicies = async (req, res, next) => {
+  try {
+    const policies = await prisma.policy.findMany({
+      where: { status: 'Active' },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    const acknowledgments = await prisma.policyAcknowledgment.findMany({
+      where: { userId: req.user.userId }
+    });
+
+    const ackSet = new Set(acknowledgments.map(a => a.policyId));
+
+    const formattedPolicies = policies.map(p => ({
+      ...p,
+      hasAcknowledged: ackSet.has(p.id)
+    }));
+
+    return res.status(200).json({ success: true, data: formattedPolicies });
+  } catch (err) { next(err); }
+};
+
+const acknowledgePolicy = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if policy exists
+    const policy = await prisma.policy.findUnique({ where: { id } });
+    if (!policy) return res.status(404).json({ success: false, message: 'Policy not found' });
+
+    // Check if already acknowledged
+    const existing = await prisma.policyAcknowledgment.findUnique({
+      where: {
+        policyId_userId: {
+          policyId: id,
+          userId: req.user.userId
+        }
+      }
+    });
+
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Policy already acknowledged' });
+    }
+
+    await prisma.policyAcknowledgment.create({
+      data: {
+        policyId: id,
+        userId: req.user.userId
+      }
+    });
+
+    // Update the acknowledgments string counter on the Policy (e.g. "1/10")
+    if (policy.acknowledgments && policy.acknowledgments.includes('/')) {
+      const parts = policy.acknowledgments.split('/');
+      const currentAck = parseInt(parts[0], 10) || 0;
+      const total = parts[1];
+      await prisma.policy.update({
+        where: { id },
+        data: { acknowledgments: `${currentAck + 1}/${total}` }
+      });
+    }
+
+    return res.status(200).json({ success: true, message: 'Policy acknowledged successfully' });
+  } catch (err) { next(err); }
+};
+
 module.exports = {
   getProfile, updateProfile,
   clockIn, clockOut, getAttendance,
@@ -800,5 +985,6 @@ module.exports = {
   getBenefits, submitBenefitClaim, getTasks,
   getHolidays, getAnnouncements,
   getDocuments, uploadDocument, deleteDocument,
-  submitResignation, getResignation, enrollBenefitPlan
+  submitResignation, getResignation, enrollBenefitPlan, unenrollBenefitPlan,
+  getPolicies, acknowledgePolicy
 };

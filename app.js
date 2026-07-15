@@ -23,6 +23,7 @@ const notificationRoutes = require('./src/routes/notificationRoutes');
 const publicRoutes      = require('./src/routes/publicRoutes');
 const pricingRoutes     = require('./src/routes/pricingRoutes');
 const importRoutes      = require('./src/routes/importRoutes');
+const reimbursementRoutes = require('./src/routes/reimbursementRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -79,6 +80,7 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/public',      publicRoutes);      // Demo booking, contact form, career applications
 app.use('/api/pricing',     pricingRoutes);
 app.use('/api/import',      importRoutes);      // Generic Excel Import Engine
+app.use('/api/reimbursements', reimbursementRoutes);
 
 // ---- GLOBAL ERROR HANDLER (hamesha last mein) ----
 app.use(errorHandler);
