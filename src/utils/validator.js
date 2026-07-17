@@ -16,6 +16,9 @@ const validationRules = {
     fullName: { required: true, type: 'string' },
     email: { required: true, type: 'email' },
     department: { required: false, type: 'string' } // Will be foreign key validated later if needed
+  },
+  jobs: {
+    title: { required: true, type: 'string' }
   }
 };
 

@@ -149,6 +149,35 @@ exports.runPayroll = async (req, res) => {
   }
 };
 
+exports.runPayrollBatch = async (req, res) => {
+  try {
+    const { employeeIds, month } = req.body;
+    if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
+      return res.status(400).json({ message: "employeeIds array is required" });
+    }
+    
+    const snapshots = [];
+    const errors = [];
+    
+    // Process concurrently (we could use Promise.allSettled)
+    const results = await Promise.allSettled(
+      employeeIds.map(id => generatePayrollSnapshot(id, month, req.user.organizationId))
+    );
+    
+    results.forEach((result, idx) => {
+      if (result.status === 'fulfilled') {
+        snapshots.push(result.value);
+      } else {
+        errors.push({ employeeId: employeeIds[idx], error: result.reason.message });
+      }
+    });
+
+    res.status(201).json({ snapshots, errors });
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
 exports.getPayrollSnapshots = async (req, res) => {
   try {
     // If employee, only their own. If HR/Admin, all for org.
@@ -160,7 +189,16 @@ exports.getPayrollSnapshots = async (req, res) => {
 
     const snapshots = await prisma.payrollSnapshot.findMany({
       where: whereClause,
-      include: { items: true, employee: { select: { fullName: true, employeeId: true } } },
+      include: { 
+        items: true, 
+        employee: { 
+          select: { 
+            fullName: true, 
+            employeeId: true,
+            avatarUrl: true
+          } 
+        } 
+      },
       orderBy: { createdAt: 'desc' }
     });
     res.json(snapshots);

@@ -10,7 +10,7 @@ const bcrypt = require('bcryptjs');
 const getAvailableJobs = async (req, res, next) => {
   try {
     const jobs = await prisma.jobPost.findMany({
-      where: { isActive: true },
+      where: { isActive: true, status: 'Published' },
       orderBy: { createdAt: 'desc' },
     });
     return res.status(200).json({ success: true, data: jobs });

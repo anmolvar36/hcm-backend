@@ -5,14 +5,22 @@
 
 const prisma = require('../config/prisma');
 const { z } = require('zod');
+const bcrypt = require('bcryptjs');
+const calendarResolver = require('../utils/calendarResolver');
 
 // ─────────────────────────────────────────
 // HELPER: Auto-provision Employee Profile
 // ─────────────────────────────────────────
 const getOrCreateProfile = async (userId) => {
+  const profileInclude = {
+    department: true,
+    manager: { select: { fullName: true, employeeId: true } },
+    user: { select: { email: true, role: true } },
+    shift: true,
+  };
   let profile = await prisma.employeeProfile.findUnique({
     where: { userId },
-    include: { department: true, manager: { select: { fullName: true, employeeId: true } }, user: { select: { email: true, role: true } } },
+    include: profileInclude,
   });
   if (!profile) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -25,9 +33,20 @@ const getOrCreateProfile = async (userId) => {
         fullName: user.email ? user.email.split('@')[0] : 'New Employee',
         employeeId: `EMP-${Math.floor(1000 + Math.random() * 9000)}`,
       },
-      include: { department: true, manager: { select: { fullName: true, employeeId: true } }, user: { select: { email: true, role: true } } },
+      include: profileInclude,
     });
   }
+
+  // Fallback to default shift if none is explicitly assigned
+  if (!profile.shift) {
+    const defaultShift = await prisma.shift.findFirst({
+      where: { isDefault: true }
+    });
+    if (defaultShift) {
+      profile.shift = defaultShift;
+    }
+  }
+
   return profile;
 };
 
@@ -84,8 +103,8 @@ const updateProfile = async (req, res, next) => {
 // ─────────────────────────────────────────
 const clockIn = async (req, res, next) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 
     // Check: already has an active clock-in session? (No date check to handle night shifts/timezones safely)
     const existing = await prisma.attendanceLog.findFirst({
@@ -96,14 +115,41 @@ const clockIn = async (req, res, next) => {
       return res.status(400).json({ success: false, error: { code: 'ALREADY_CLOCKED_IN', message: 'You are already clocked in. Please clock out of your active session first.' } });
     }
 
+    // Fetch Employee Profile & Shift
+    const empProfile = await prisma.employeeProfile.findUnique({
+      where: { userId: req.user.userId },
+      include: { shift: true }
+    });
+    
+    let shift = empProfile?.shift;
+    if (!shift) {
+      shift = await prisma.shift.findFirst({ where: { isDefault: true } });
+    }
+
+    let lateMinutes = 0;
+
+    if (shift) {
+      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+      const expectedStart = new Date(now);
+      expectedStart.setHours(startHour, startMin, 0, 0);
+      
+      const diffMin = Math.floor((now - expectedStart) / 60000);
+      if (diffMin > shift.graceInMin) {
+        lateMinutes = diffMin;
+      }
+    }
+
     const log = await prisma.attendanceLog.create({
       data: {
         userId: req.user.userId,
         date: today,
-        clockIn: new Date(),
+        clockIn: now,
         mode: req.body.mode || 'Office',
-        status: 'Present',
+        status: lateMinutes > 0 ? 'Late' : 'Present',
+        shiftId: shift?.id,
+        lateMinutes
       },
+      include: { shift: true },
     });
 
     return res.status(201).json({ success: true, data: log, message: 'Clocked in successfully.' });
@@ -117,6 +163,7 @@ const clockOut = async (req, res, next) => {
   try {
     const activeLog = await prisma.attendanceLog.findFirst({
       where: { userId: req.user.userId, clockOut: null },
+      include: { shift: true }
     });
 
     if (!activeLog) {
@@ -127,9 +174,50 @@ const clockOut = async (req, res, next) => {
     const workedMs = clockOutTime - new Date(activeLog.clockIn);
     const workedMin = Math.floor(workedMs / 60000);
 
+    let earlyExitMinutes = 0;
+    let overtimeMinutes = 0;
+    let breakMinutes = 0;
+    let isHalfDay = false;
+    
+    const shift = activeLog.shift;
+    
+    if (shift) {
+      const [startHour, startMin] = shift.startTime.split(':').map(Number);
+      const [endHour, endMin] = shift.endTime.split(':').map(Number);
+      
+      const expectedEnd = new Date(activeLog.clockIn);
+      expectedEnd.setHours(endHour, endMin, 0, 0);
+      
+      if (endHour < startHour) {
+        // Handle night shifts
+        expectedEnd.setDate(expectedEnd.getDate() + 1);
+      }
+      
+      const diffEndMin = Math.floor((clockOutTime - expectedEnd) / 60000);
+      
+      if (diffEndMin < -shift.graceOutMin) {
+        earlyExitMinutes = Math.abs(diffEndMin);
+      } else if (diffEndMin > 0) {
+        overtimeMinutes = diffEndMin;
+      }
+      
+      breakMinutes = shift.breakDurationMin;
+      
+      if (workedMin < (shift.workingHoursMin / 2)) {
+        isHalfDay = true;
+      }
+    }
+
     const updated = await prisma.attendanceLog.update({
       where: { id: activeLog.id },
-      data: { clockOut: clockOutTime, totalWorkedMin: workedMin },
+      data: { 
+        clockOut: clockOutTime, 
+        totalWorkedMin: workedMin,
+        earlyExitMinutes,
+        overtimeMinutes,
+        breakMinutes,
+        isHalfDay
+      },
     });
 
     return res.status(200).json({ success: true, data: updated, message: 'Clocked out successfully.' });
@@ -143,7 +231,7 @@ const getAttendance = async (req, res, next) => {
   try {
     const logs = await prisma.attendanceLog.findMany({
       where: { userId: req.user.userId },
-      orderBy: { date: 'desc' },
+      orderBy: { clockIn: 'desc' },
       take: 30, // last 30 records
     });
 
@@ -184,12 +272,45 @@ const applyLeave = async (req, res, next) => {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
     }
 
+    const startDateObj = new Date(parsed.data.startDate);
+    const endDateObj = new Date(parsed.data.endDate);
+
+    // --- INTEGRATE ENTERPRISE CALENDAR FOR LEAVE CALCULATION ---
+    let calculatedDays = 0;
+    try {
+      const msPerDay = 1000 * 60 * 60 * 24;
+      const daysCount = Math.ceil((endDateObj - startDateObj) / msPerDay) + 1;
+      
+      for (let i = 0; i < daysCount; i++) {
+        const currentDate = new Date(startDateObj.getTime() + (i * msPerDay));
+        const dayType = await calendarResolver.getDayType(req.user.userId, currentDate);
+        
+        // This simulates a policy where FULL weekends and holidays don't consume leave balance.
+        // In a full implementation, we would query the specific LeavePolicy here.
+        if (dayType.type === 'WORKING_DAY') {
+          calculatedDays += 1;
+        } else if (dayType.type === 'WEEKEND' && dayType.detail.type === 'HALF_DAY') {
+          calculatedDays += 0.5; // Half day weekend still consumes 0.5 leave
+        }
+        // Holidays and FULL_DAY weekends add 0 to calculatedDays.
+      }
+    } catch (err) {
+      console.warn(`[Leave Calendar Warning] Failed to resolve calendar for ${req.user.userId}, defaulting to frontend totalDays. Error: ${err.message}`);
+      calculatedDays = parsed.data.totalDays;
+    }
+
+    if (calculatedDays <= 0) {
+      return res.status(400).json({ success: false, error: { code: 'INVALID_LEAVE', message: 'Leave duration must be greater than 0 working days.' } });
+    }
+    // ------------------------------------------------------------
+
     const leave = await prisma.leaveRequest.create({
       data: {
         userId: req.user.userId,
         ...parsed.data,
-        startDate: new Date(parsed.data.startDate),
-        endDate: new Date(parsed.data.endDate),
+        totalDays: calculatedDays,
+        startDate: startDateObj,
+        endDate: endDateObj,
         status: 'PENDING',
       },
     });

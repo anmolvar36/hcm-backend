@@ -188,6 +188,30 @@ const schemas = {
       'Payment Date (YYYY-MM-DD)': 'paymentDate',
       'Currency': 'currency'
     }
+  },
+  jobs: {
+    fields: ['title', 'department', 'salaryRange', 'jobType', 'location', 'experience', 'openings', 'status', 'requirements', 'description'],
+    templateHeaders: ['Job Title', 'Department', 'Salary Range', 'Job Type', 'Location', 'Experience Required', 'Openings', 'Status', 'Job Requirements', 'Job Description'],
+    aliases: {
+      'Job Title': 'title',
+      'Title': 'title',
+      'Department': 'department',
+      'Dept': 'department',
+      'Salary Range': 'salaryRange',
+      'Salary': 'salaryRange',
+      'Job Type': 'jobType',
+      'Type': 'jobType',
+      'Location': 'location',
+      'Experience Required': 'experience',
+      'Experience': 'experience',
+      'Openings': 'openings',
+      'Positions': 'openings',
+      'Status': 'status',
+      'Job Requirements': 'requirements',
+      'Requirements': 'requirements',
+      'Job Description': 'description',
+      'Description': 'description'
+    }
   }
   // Future entities (Candidates, Departments, etc.) can be added here
 };

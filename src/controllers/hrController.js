@@ -43,6 +43,8 @@ const createJob = async (req, res, next) => {
       location: z.string().optional(),
       jobType: z.string().optional(),
       experience: z.string().optional(),
+      openings: z.union([z.number(), z.string()]).optional(),
+      status: z.string().optional(),
     });
 
     const parsed = schema.safeParse(req.body);
@@ -50,6 +52,9 @@ const createJob = async (req, res, next) => {
       return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
     }
 
+    if (parsed.data.openings && typeof parsed.data.openings === 'string') {
+      parsed.data.openings = parseInt(parsed.data.openings, 10);
+    }
     const job = await prisma.jobPost.create({ data: parsed.data });
     return res.status(201).json({ success: true, data: job, message: 'Job posted successfully.' });
   } catch (err) { next(err); }
@@ -58,11 +63,13 @@ const createJob = async (req, res, next) => {
 // PUT /api/hr/jobs/:id
 const updateJob = async (req, res, next) => {
   try {
-    const { title, department, description, requirements, salaryRange, location, jobType, isActive, experience } = req.body;
+    const { title, department, description, requirements, salaryRange, location, jobType, isActive, experience, openings, status } = req.body;
+
+    const parsedOpenings = openings ? parseInt(openings, 10) : undefined;
 
     const job = await prisma.jobPost.update({
       where: { id: req.params.id },
-      data: { title, department, description, requirements, salaryRange, location, jobType, isActive, experience },
+      data: { title, department, description, requirements, salaryRange, location, jobType, isActive, experience, openings: parsedOpenings, status },
     });
 
     return res.status(200).json({ success: true, data: job });
@@ -885,10 +892,9 @@ const finalizeExit = async (req, res, next) => {
 const getAllLeaves = async (req, res, next) => {
   try {
     const leaves = await prisma.leaveRequest.findMany({
-      where: { status: 'PENDING' },
       include: {
         user: {
-          select: { email: true, employeeProfile: { select: { fullName: true, employeeId: true } } },
+          select: { email: true, employeeProfile: { select: { fullName: true, employeeId: true, avatarUrl: true } } },
         },
       },
       orderBy: { createdAt: 'desc' },

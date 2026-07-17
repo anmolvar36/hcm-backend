@@ -33,6 +33,7 @@ enum RoleStatus {
 
 enum LeaveStatus {
   PENDING
+  MANAGER_APPROVED
   APPROVED
   REJECTED
 }
@@ -51,6 +52,28 @@ enum ApplicationStatus {
   OFFERED
   HIRED
   REJECTED
+  WITHDRAWN
+}
+
+enum HolidayType {
+  PUBLIC
+  COMPANY
+  REGIONAL
+  OPTIONAL
+}
+
+enum WeekendType {
+  FULL_DAY
+  HALF_DAY
+  WORKING_DAY
+}
+
+enum AssignmentEntityType {
+  EMPLOYEE
+  DEPARTMENT
+  LOCATION
+  SHIFT
+  BRANCH
 }
 
 enum LifecycleStatus {
@@ -126,6 +149,11 @@ model Organization {
   approvalWorkflows  ApprovalWorkflow[]
   payrollConfigs     PayrollConfiguration[]
   salaryStructures   SalaryStructure[]
+  shifts             Shift[]
+  overtimePolicies   OvertimePolicy[]
+  workCalendars      WorkCalendar[]
+  leavePolicies      LeavePolicy[]
+  attendancePolicy   AttendancePolicy?
 }
 
 // ============================================================
@@ -245,6 +273,13 @@ model EmployeeProfile {
   lifecycleStatus         LifecycleStatus?    @default(ACTIVE)
   
   exitLifecycle           ExitLifecycle?
+
+  shiftId                 String?
+  shift                   Shift?              @relation(fields: [shiftId], references: [id])
+  overtimePolicyId        String?
+  overtimePolicy          OvertimePolicy?     @relation(fields: [overtimePolicyId], references: [id])
+  salaryType              String              @default("Monthly")
+  hourlyRate              Float?
 }
 
 // ============================================================
@@ -288,6 +323,8 @@ model JobPost {
   location     String?
   jobType      String?
   experience   String?
+  openings     Int              @default(1)
+  status       String           @default("Published")
   isActive     Boolean          @default(true)
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
@@ -343,26 +380,87 @@ model Interview {
 }
 
 // ============================================================
-// 9. Attendance Log (Clock In / Clock Out)
+// 8b. Shift & Overtime Policies
 // ============================================================
-model AttendanceLog {
-  id             String    @id @default(uuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+model Shift {
+  id               String    @id @default(uuid())
+  name             String
+  startTime        String    // e.g. "09:00"
+  endTime          String    // e.g. "18:00"
+  breakDurationMin Int       @default(60)
+  workingHoursMin  Int       @default(480)
+  graceInMin       Int       @default(15)
+  graceOutMin      Int       @default(15)
+  isDefault        Boolean   @default(false)
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  employees        EmployeeProfile[]
+  attendanceLogs   AttendanceLog[]
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
 
-  date           DateTime  @db.Date
-  clockIn        DateTime
-  clockOut       DateTime?
-  totalWorkedMin Int       @default(0)
-  status         String    @default("Present")
-  mode           String    @default("Office")
+model OvertimePolicy {
+  id               String    @id @default(uuid())
+  name             String
+  weekdayMultiplier Float     @default(1.5)
+  weekendMultiplier Float     @default(2.0)
+  holidayMultiplier Float     @default(2.0)
+  minOvertimeMin   Int       @default(30)
+  maxOvertimeMin   Int       @default(240)
+  isDefault        Boolean   @default(false)
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  employees        EmployeeProfile[]
 
-  createdAt      DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 // ============================================================
-// 10. Leave Request
+// 9. Attendance Log (Clock In / Clock Out)
 // ============================================================
+model AttendanceLog {
+  id               String    @id @default(uuid())
+  userId           String
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  date             DateTime  @db.Date
+  clockIn          DateTime
+  clockOut         DateTime?
+  totalWorkedMin   Int       @default(0)
+  status           String    @default("Present")
+  mode             String    @default("Office")
+
+  shiftId          String?
+  shift            Shift?    @relation(fields: [shiftId], references: [id])
+  
+  lateMinutes      Int       @default(0)
+  earlyExitMinutes Int       @default(0)
+  overtimeMinutes  Int       @default(0)
+  breakMinutes     Int       @default(0)
+  isHalfDay        Boolean   @default(false)
+
+  createdAt        DateTime  @default(now())
+}
+
+// ============================================================
+// 10. Leave Policy & Requests
+// ============================================================
+model LeavePolicy {
+  id               String    @id @default(uuid())
+  name             String    @unique
+  isPaid           Boolean   @default(true)
+  yearlyAllowance  Int       @default(0)
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
 model LeaveRequest {
   id               String      @id @default(uuid())
   userId           String
@@ -598,16 +696,18 @@ model CustomRole {
 // 20. Holiday Model
 // ============================================================
 model Holiday {
-  id          String   @id @default(uuid())
+  id          String       @id @default(uuid())
+  calendarId  String?
+  calendar    WorkCalendar? @relation(fields: [calendarId], references: [id], onDelete: Cascade)
   name        String
   date        String
-  type        String
+  type        HolidayType  @default(PUBLIC)
   region      String
-  status      String   @default("Upcoming")
-  repeat      Boolean  @default(false)
-  description String?  @db.Text
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  status      String       @default("Upcoming")
+  repeat      Boolean      @default(false)
+  description String?      @db.Text
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
 
 // ============================================================
@@ -1151,6 +1251,21 @@ model ApprovalLog {
   createdAt        DateTime        @default(now())
 }
 
+model AttendancePolicy {
+  id                 String          @id @default(uuid())
+  organizationId     String          @unique
+  organization       Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  
+  lateMarkThresholdMin Int           @default(15) // Minutes after which it's a late mark
+  lateMarksForHalfDay  Int           @default(3)  // How many late marks equals a half-day LOP
+  earlyExitThresholdMin Int          @default(15) // Minutes before which it's an early exit
+  earlyExitsForHalfDay Int           @default(3)  // How many early exits equals a half-day LOP
+  halfDayWorkMin       Int           @default(240) // Minimum minutes for a half-day present
+
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+}
+
 model PayrollConfiguration {
   id               String          @id @default(uuid())
   organizationId   String          @unique
@@ -1177,6 +1292,14 @@ model PayrollSnapshot {
   totalContributions Float         @default(0)
   netSalary        Float
   employerCost     Float           @default(0)
+  
+  // Reporting Fields
+  totalWorkingDays Float           @default(0)
+  presentDays      Float           @default(0)
+  paidLeaveDays    Float           @default(0)
+  unpaidLeaveDays  Float           @default(0)
+  overtimeHours    Float           @default(0)
+  overtimeAmount   Float           @default(0)
   
   calculationLog   String?         @db.LongText // JSON array of logs
   
@@ -1253,4 +1376,53 @@ model SalaryStructureComponent {
   
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+// ============================================================
+// 34. Work Calendar Models
+// ============================================================
+
+model WorkCalendar {
+  id                       String                   @id @default(uuid())
+  companyId                String?
+  organization             Organization?            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name                     String
+  description              String?                  @db.Text
+  timezone                 String                   @default("UTC")
+  isDefaultCompanyCalendar Boolean                  @default(false)
+  status                   String                   @default("Active")
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  holidays                 Holiday[]
+  versions                 WorkCalendarVersion[]
+  assignments              WorkCalendarAssignment[]
+}
+
+model WorkCalendarVersion {
+  id            String                @id @default(uuid())
+  calendarId    String
+  calendar      WorkCalendar          @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  versionNumber Int                   @default(1)
+  effectiveFrom DateTime              @default(now())
+  effectiveTo   DateTime?
+  weekends      WorkCalendarWeekend[]
+}
+
+model WorkCalendarWeekend {
+  id        String              @id @default(uuid())
+  versionId String
+  version   WorkCalendarVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  dayOfWeek String
+  type      WeekendType         @default(FULL_DAY)
+}
+
+model WorkCalendarAssignment {
+  id            String               @id @default(uuid())
+  calendarId    String
+  calendar      WorkCalendar         @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  entityType    AssignmentEntityType
+  entityId      String               
+  effectiveFrom DateTime             @default(now())
+  effectiveTo   DateTime?
 }

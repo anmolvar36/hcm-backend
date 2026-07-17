@@ -7,6 +7,7 @@ const prisma = require('../config/prisma');
 const { z } = require('zod');
 const bcrypt = require('bcryptjs');
 const { ensureDefaultRoles } = require('../utils/roleSeeder');
+const calendarResolver = require('../utils/calendarResolver');
 
 const roleToEnum = (role = '') => {
   const normalized = String(role).trim().toUpperCase().replace(/[\s-]+/g, '_');
@@ -305,6 +306,10 @@ const createUser = async (req, res, next) => {
       salaryVersionId: z.string().optional().nullable(),
       effectiveDate: z.string().optional().nullable(),
       customRoleId: z.string().optional().nullable(),
+      shiftId: z.string().optional().nullable(),
+      overtimePolicyId: z.string().optional().nullable(),
+      salaryType: z.enum(['Monthly', 'Hourly']).optional(),
+      hourlyRate: z.number().optional().nullable(),
     });
 
     const parsed = schema.safeParse(req.body);
@@ -393,6 +398,10 @@ const createUser = async (req, res, next) => {
             avatarUrl: data.img || null,
             departmentId: department.id,
             managerId,
+            salaryType: data.salaryType || 'Monthly',
+            hourlyRate: data.hourlyRate || null,
+            shiftId: data.shiftId || null,
+            overtimePolicyId: data.overtimePolicyId || null,
             compensationProfile: {
               create: {
                 monthlyCTC: data.monthlyCTC || 0,
@@ -600,11 +609,11 @@ const generatePayslip = async (req, res, next) => {
     }
 
     const { employeeId, month, basic, hra, allowance, bonus = 0, pf, tax } = parsed.data;
-    const netPay = basic + hra + allowance + bonus - pf - tax;
 
     let targetProfileId = employeeId;
     let profile = await prisma.employeeProfile.findUnique({
-      where: { id: targetProfileId }
+      where: { id: targetProfileId },
+      include: { overtimePolicy: true }
     });
 
     if (!profile) {
@@ -644,6 +653,100 @@ const generatePayslip = async (req, res, next) => {
       else if (curr.includes('AED') || curr.includes('د.إ')) currencyCode = 'AED';
     }
 
+    // DYNAMIC PAYROLL LOGIC
+    const logs = await prisma.attendanceLog.findMany({
+      where: { userId: profile.userId }
+    });
+    
+    const targetMonthStr = month.toLowerCase();
+    const isYYYYMM = /^\d{4}-\d{2}$/.test(month);
+    
+    // --- INTEGRATE ENTERPRISE CALENDAR FOR WORKING DAYS ---
+    let calendarWorkingDays = 0;
+    let calendarDays = 0;
+    let holidaysCount = 0;
+    let weekendsCount = 0;
+
+    if (isYYYYMM) {
+      try {
+        const [yyyy, mm] = month.split('-');
+        const daysInMonth = new Date(yyyy, mm, 0).getDate();
+        calendarDays = daysInMonth;
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          const checkDate = new Date(yyyy, mm - 1, day);
+          const dayType = await calendarResolver.getDayType(profile.userId, checkDate);
+          
+          if (dayType.type === 'WORKING_DAY') {
+            calendarWorkingDays += 1;
+          } else if (dayType.type === 'WEEKEND') {
+            if (dayType.detail.type === 'HALF_DAY') calendarWorkingDays += 0.5;
+            weekendsCount++;
+          } else if (dayType.type === 'HOLIDAY') {
+            holidaysCount++;
+          }
+        }
+        console.log(`[Payroll Calendar] Employee: ${profile.userId}, Month: ${month} -> Working Days: ${calendarWorkingDays}, Weekends: ${weekendsCount}, Holidays: ${holidaysCount}`);
+      } catch (calErr) {
+        console.warn(`[Payroll Calendar Warning] ${calErr.message}. Defaulting working days logic.`);
+      }
+    }
+    // ------------------------------------------------------
+    
+    let totalWorkedMin = 0;
+    let totalOTMin = 0;
+    
+    logs.forEach(log => {
+      const d = new Date(log.date);
+      let match = false;
+      if (isYYYYMM) {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        if (`${yyyy}-${mm}` === month) match = true;
+      } else {
+        const logMonth = d.toLocaleString('en-US', { month: 'long', year: 'numeric' }).toLowerCase();
+        const logMonthShort = d.toLocaleString('en-US', { month: 'short', year: 'numeric' }).toLowerCase();
+        if (targetMonthStr === logMonth || targetMonthStr === logMonthShort || targetMonthStr.includes(logMonth) || targetMonthStr.includes(logMonthShort)) {
+          match = true;
+        }
+      }
+      
+      if (match) {
+        totalWorkedMin += log.totalWorkedMin;
+        totalOTMin += log.overtimeMinutes;
+      }
+    });
+
+    let finalBasic = basic;
+    let finalBonus = bonus || 0;
+
+    if (profile.salaryType === 'Hourly' && profile.hourlyRate) {
+      const hoursWorked = totalWorkedMin / 60;
+      finalBasic = hoursWorked * profile.hourlyRate;
+    }
+
+    if (totalOTMin > 0) {
+      let hourlyRate = profile.hourlyRate || 0;
+      if (!hourlyRate && profile.salaryType === 'Monthly') {
+        const base = finalBasic + hra + allowance;
+        hourlyRate = base / 160; 
+      }
+      
+      let otRateMultiplier = 1.0;
+      if (profile.overtimePolicy) {
+        otRateMultiplier = profile.overtimePolicy.weekdayMultiplier || 1.5;
+      } else {
+        const defPolicy = await prisma.overtimePolicy.findFirst({ where: { isDefault: true } });
+        if (defPolicy) otRateMultiplier = defPolicy.weekdayMultiplier;
+      }
+      
+      const otHours = totalOTMin / 60;
+      const otPay = otHours * hourlyRate * otRateMultiplier;
+      finalBonus += otPay;
+    }
+    
+    const netPay = finalBasic + hra + allowance + finalBonus - pf - tax;
+
     // Check if a payslip already exists for this employee and month
     const existing = await prisma.payslip.findFirst({
       where: { employeeId: targetProfileId, month }
@@ -653,11 +756,11 @@ const generatePayslip = async (req, res, next) => {
     if (existing) {
       payslip = await prisma.payslip.update({
         where: { id: existing.id },
-        data: { basic, hra, allowance, bonus, pf, tax, netPay, currency: currencyCode }
+        data: { basic: finalBasic, hra, allowance, bonus: finalBonus, pf, tax, netPay, currency: currencyCode }
       });
     } else {
       payslip = await prisma.payslip.create({
-        data: { employeeId: targetProfileId, month, basic, hra, allowance, bonus, pf, tax, netPay, status: 'Unpaid', currency: currencyCode },
+        data: { employeeId: targetProfileId, month, basic: finalBasic, hra, allowance, bonus: finalBonus, pf, tax, netPay, status: 'Unpaid', currency: currencyCode },
       });
     }
 

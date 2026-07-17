@@ -27,6 +27,7 @@ const getTeam = async (req, res, next) => {
       include: {
         department: true,
         user: { select: { email: true, isActive: true } },
+        compensationProfile: true,
       },
     });
 
@@ -80,7 +81,7 @@ const getTeamLeaves = async (req, res, next) => {
 const reviewLeave = async (req, res, next) => {
   try {
     const schema = z.object({
-      status: z.enum(['APPROVED', 'REJECTED']),
+      status: z.enum(['MANAGER_APPROVED', 'APPROVED', 'REJECTED']),
       managerComment: z.string().optional(),
     });
 
@@ -92,7 +93,7 @@ const reviewLeave = async (req, res, next) => {
     const leave = await prisma.leaveRequest.findUnique({ where: { id: req.params.id } });
     if (!leave) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Leave request not found.' } });
 
-    if (leave.status !== 'PENDING') {
+    if (leave.status !== 'PENDING' && leave.status !== 'MANAGER_APPROVED') {
       return res.status(400).json({ success: false, error: { code: 'ALREADY_REVIEWED', message: 'This leave has already been reviewed.' } });
     }
 
@@ -678,6 +679,49 @@ const updateTeamReview = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// ─────────────────────────────────────────
+// 15. REQUEST SALARY INCREMENT (ON BEHALF OF EMPLOYEE)  →  POST /api/manager/increments
+// ─────────────────────────────────────────
+const requestSalaryIncrement = async (req, res, next) => {
+  try {
+    const schema = z.object({
+      employeeId: z.string(), // This is the employeeProfile id
+      requestedSalary: z.number().positive(),
+      effectiveDate: z.string(),
+      reason: z.string().optional().default('')
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message } });
+    }
+
+    const { employeeId, requestedSalary, effectiveDate, reason } = parsed.data;
+
+    const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
+    if (!managerProfile) return res.status(404).json({ success: false, message: 'Manager profile not found.' });
+
+    const employee = await prisma.employeeProfile.findUnique({ where: { id: employeeId } });
+    if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
+    
+    if (employee.managerId !== managerProfile.id) {
+      return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager.' });
+    }
+
+    const request = await prisma.salaryIncrementRequest.create({
+      data: {
+        employeeId: employee.id,
+        requestedSalary,
+        reason,
+        effectiveDate: new Date(effectiveDate),
+        status: 'ManagerApproved' // Auto-approve manager's own request so it goes to HR
+      }
+    });
+
+    return res.status(201).json({ success: true, data: request, message: 'Salary increment request created and sent to HR.' });
+  } catch (err) { next(err); }
+};
+
 const getIncrementRequests = async (req, res, next) => {
   try {
     const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
@@ -986,5 +1030,7 @@ module.exports = {
   getTeamReviews, createTeamReview, updateTeamReview,
   getIncrementRequests, approveIncrementRequest, rejectIncrementRequest,
   getResignations, reviewResignation,
-  getManagerReimbursements, reviewManagerReimbursement
+  getManagerReimbursements,
+  reviewManagerReimbursement,
+  requestSalaryIncrement
 };

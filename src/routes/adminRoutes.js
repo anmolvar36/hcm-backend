@@ -33,6 +33,14 @@ const {
   getWorkflows, createWorkflow
 } = require('../controllers/payrollConfigController');
 
+const {
+  getShifts, createShift, updateShift, deleteShift
+} = require('../controllers/shiftController');
+
+const {
+  getOvertimePolicies, createOvertimePolicy, updateOvertimePolicy, deleteOvertimePolicy
+} = require('../controllers/overtimePolicyController');
+
 // Only ADMIN, SUPERADMIN, and HR (for shared dashboards like Payroll Center)
 router.use(protect, authorize('ADMIN', 'SUPERADMIN', 'HR'));
 
@@ -140,6 +148,18 @@ router.patch('/leaves/:id', reviewLeave);
 // Resignations
 router.get('/resignations', getAdminResignations);
 router.patch('/resignations/:id/override', overrideResignation);
+
+// Shifts
+router.get('/shifts', getShifts);
+router.post('/shifts', createShift);
+router.put('/shifts/:id', updateShift);
+router.delete('/shifts/:id', deleteShift);
+
+// Overtime Policies
+router.get('/overtime-policies', getOvertimePolicies);
+router.post('/overtime-policies', createOvertimePolicy);
+router.put('/overtime-policies/:id', updateOvertimePolicy);
+router.delete('/overtime-policies/:id', deleteOvertimePolicy);
 
 module.exports = router;
 

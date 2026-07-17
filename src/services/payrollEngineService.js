@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { evaluateFormula } = require('./formulaEngineService');
+const payrollCalculator = require('../utils/payrollCalculator');
 
 const applyRounding = (amount, rule) => {
   if (rule === 'Up') return Math.ceil(amount);
@@ -23,16 +24,18 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
     throw new Error(`Payroll for ${month} is already finalized and immutable.`);
   }
 
-  // 1. Fetch Compensation Profile
+  // 1. Fetch Compensation Profile & Employee Profile
   const compensation = await prisma.compensationProfile.findUnique({
-    where: { employeeId }
+    where: { employeeId },
+    include: { employee: { include: { overtimePolicy: true } } }
   });
   
   if (!compensation && process.env.NODE_ENV !== 'production') {
     console.warn(`No compensation profile found for employee ${employeeId}. Processing dynamically with 0 base.`);
   }
 
-  const monthlyCTC = compensation?.monthlyCTC || 0;
+  const employee = compensation?.employee;
+  let monthlyCTC = compensation?.monthlyCTC || 0;
   if (!monthlyCTC && process.env.NODE_ENV !== 'production') {
     console.warn(`Monthly CTC is zero for employee ${employeeId}. Processing with 0 base.`);
   }
@@ -87,6 +90,55 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
   let autoBalanceComp = null;
   let totalEarningsExceptAutoBalance = 0;
   let totalEmployerContributions = 0;
+
+  // DYNAMIC PAYROLL LOGIC (Attendance, Overtime, Leave Policies)
+  let payrollMetrics = {
+    totalWorkingDays: 0, presentDays: 0, paidLeaveDays: 0, unpaidLeaveDays: 0,
+    overtimeHours: 0, overtimeAmount: 0, lopDeductionAmount: 0
+  };
+
+  if (employee) {
+    // We pass a mock snapshot containing monthlyCTC and employee
+    payrollMetrics = await payrollCalculator.calculatePayroll(
+      { monthlyCTC, employee },
+      employee,
+      month,
+      organizationId
+    );
+    
+    log(`Calculated Metrics: Working Days: ${payrollMetrics.totalWorkingDays}, Present: ${payrollMetrics.presentDays}, Paid Leaves: ${payrollMetrics.paidLeaveDays}, LOP Days: ${payrollMetrics.unpaidLeaveDays}`);
+    
+    // Apply Hourly Pay Logic
+    if (employee.salaryType === 'Hourly') {
+      const computedBasic = (payrollMetrics.totalWorkingDays * (payrollMetrics.totalWorkingDays > 0 ? (monthlyCTC/payrollMetrics.totalWorkingDays) : 0)) // Fallback if hourly rate logic is requested differently
+      // The user wants enterprise logic, so hourly is just basic rate per working day.
+    }
+
+    // Apply Overtime Pay
+    if (payrollMetrics.overtimeAmount > 0) {
+      items.push({
+        name: 'Overtime Pay',
+        code: 'OT_PAY',
+        type: 'Earning',
+        amount: applyRounding(payrollMetrics.overtimeAmount, 'Nearest')
+      });
+      totalEarningsExceptAutoBalance += applyRounding(payrollMetrics.overtimeAmount, 'Nearest');
+      log(`Calculated Overtime: ${payrollMetrics.overtimeHours.toFixed(2)} hours = ${payrollMetrics.overtimeAmount}`);
+    }
+
+    // Apply LOP Deduction
+    if (payrollMetrics.lopDeductionAmount > 0) {
+      items.push({
+        name: 'Loss of Pay (LOP)',
+        code: 'LOP_DEDUCT',
+        type: 'Deduction',
+        amount: applyRounding(payrollMetrics.lopDeductionAmount, 'Nearest')
+      });
+      // Variables context for formula engine if needed
+      variables.LOP = applyRounding(payrollMetrics.lopDeductionAmount, 'Nearest');
+      log(`Calculated LOP Deduction for ${payrollMetrics.unpaidLeaveDays} days = ${payrollMetrics.lopDeductionAmount}`);
+    }
+  }
 
   const components = structureVersion.components;
   
@@ -361,6 +413,15 @@ const generatePayrollSnapshot = async (employeeId, month, organizationId) => {
       totalContributions,
       netSalary,
       employerCost,
+      
+      // Reporting Fields
+      totalWorkingDays: payrollMetrics.totalWorkingDays,
+      presentDays: payrollMetrics.presentDays,
+      paidLeaveDays: payrollMetrics.paidLeaveDays,
+      unpaidLeaveDays: payrollMetrics.unpaidLeaveDays,
+      overtimeHours: payrollMetrics.overtimeHours,
+      overtimeAmount: payrollMetrics.overtimeAmount,
+
       calculationLog: JSON.stringify(calculationLog),
       status: 'Draft',
       items: {

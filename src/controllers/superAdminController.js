@@ -11,6 +11,7 @@ const bcrypt = require('bcryptjs');
 const { z } = require('zod');
 const fs = require('fs/promises');
 const path = require('path');
+const { generatePayrollSnapshot } = require('../services/payrollEngineService');
 
 // ─────────────────────────────────────────
 // PLATFORM STATS  →  GET /api/superadmin/stats
@@ -584,7 +585,7 @@ const createUser = async (req, res, next) => {
 
 const updateUser = async (req, res, next) => {
   try {
-    const { name, email, role, department } = req.body;
+    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, salaryType, hourlyRate } = req.body;
     let orgId = undefined;
     if (department) {
       const org = await prisma.organization.findFirst({ where: { name: department } });
@@ -598,22 +599,43 @@ const updateUser = async (req, res, next) => {
     });
     if (!existingUser) return res.status(404).json({ success: false, error: { message: 'User not found' } });
 
+    let managerId = undefined;
+    if (manager && manager !== 'None') {
+      const managerUser = await prisma.employeeProfile.findFirst({
+        where: { OR: [{ fullName: manager }, { employeeId: manager }] }
+      });
+      if (managerUser) managerId = managerUser.id;
+    }
+
+    // We can update the EmployeeProfile with all these fields
+    const empData = {
+      ...(name && { fullName: name }),
+      ...(empType && { employmentType: empType }),
+      ...(phone && { phone }),
+      ...(address && { address }),
+      ...(managerId !== undefined && { managerId }),
+      ...(shiftId !== undefined && { shiftId: shiftId || null }),
+      ...(overtimePolicyId !== undefined && { overtimePolicyId: overtimePolicyId || null }),
+      ...(salaryType && { salaryType }),
+      ...(hourlyRate !== undefined && { hourlyRate: hourlyRate ? parseFloat(hourlyRate) : null })
+    };
+
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: {
         ...(email && { email }),
         ...(role && { role: roleToEnum(role) }),
+        ...(status && { status, isActive: status === 'Active' }),
         ...(orgId !== undefined && { organizationId: orgId }),
-        ...(name && {
-          employeeProfile: existingUser.employeeProfile ? {
-            update: { fullName: name }
-          } : {
-            create: {
-              fullName: name,
-              employeeId: 'EMP-' + Math.floor(Math.random() * 100000),
-            }
+        employeeProfile: existingUser.employeeProfile ? {
+          update: empData
+        } : {
+          create: {
+            fullName: name || email.split('@')[0],
+            employeeId: 'EMP-' + Math.floor(Math.random() * 100000),
+            ...empData
           }
-        })
+        }
       }
     });
 
@@ -797,9 +819,15 @@ const getPayrollHistory = async (req, res, next) => {
         month: p.month,
         status: p.status === 'Paid' ? 'Processed' : p.status,
         date: p.paymentDate ? p.paymentDate.toISOString().split('T')[0] : p.createdAt.toISOString().split('T')[0],
-        attendancePresent: 22,
-        attendanceAbsent: 0,
-        leavesTaken: 0
+        attendancePresent: p.presentDays || 0,
+        attendanceAbsent: p.unpaidLeaveDays || 0,
+        leavesTaken: p.paidLeaveDays || 0,
+        totalWorkingDays: p.totalWorkingDays || 0,
+        paidLeaveDays: p.paidLeaveDays || 0,
+        unpaidLeaveDays: p.unpaidLeaveDays || 0,
+        overtimeHours: p.overtimeHours || 0,
+        overtimeAmount: p.overtimeAmount || 0,
+        lopDeductionAmount: p.items.find(i => i.code === 'LOP_DEDUCT')?.amount || 0
       };
     });
 
@@ -903,34 +931,16 @@ const generatePayroll = async (req, res, next) => {
   try {
     const { generateMonth } = req.body;
     
-    // Validate request
     if (!generateMonth) {
       return res.status(400).json({ success: false, message: 'generateMonth is required.' });
     }
 
-    // Load actual settings, or use mock default if empty
-    const settingsPath = path.join(__dirname, '../data/payrollSettings.json');
-    let payrollSettings;
-    try {
-      const data = await fs.readFile(settingsPath, 'utf8');
-      payrollSettings = JSON.parse(data);
-    } catch {
-      payrollSettings = {
-        baseSalaries: { superuser: 8000, admin: 6500, hr: 5500, manager: 6000, employee: 5000 },
-        allowances: { superuser: 2000, admin: 1500, hr: 1200, manager: 1300, employee: 1000 }
-      };
-    }
-
-    const startOfMonth = new Date(`${generateMonth}-01T00:00:00Z`);
-    const endOfMonth = new Date(startOfMonth.getFullYear(), startOfMonth.getMonth() + 1, 0, 23, 59, 59);
-
-    // Get employees
     const employeesList = await prisma.user.findMany({
       where: { role: { not: 'SUPERADMIN' } },
       include: { employeeProfile: true, organization: true }
     });
 
-    const existingPayslips = await prisma.payslip.findMany({
+    const existingSnapshots = await prisma.payrollSnapshot.findMany({
       where: { month: generateMonth }
     });
 
@@ -938,55 +948,23 @@ const generatePayroll = async (req, res, next) => {
     let skipped = 0;
 
     for (const emp of employeesList) {
-      // Check if already generated
-      if (existingPayslips.some(p => p.employeeId === emp.employeeProfile?.id)) {
-        skipped++;
-        continue;
-      }
-
       if (!emp.employeeProfile) {
         skipped++;
         continue;
       }
-
-      const roleKey = (emp.role || 'employee').toLowerCase();
-      const basic = payrollSettings.baseSalaries[roleKey] || 5000;
-      const baseAllowance = payrollSettings.allowances[roleKey] || 1000;
-
-      // Unpaid leave deduction computation
-      // Since it's dynamic now, let's just use defaults for unpaidDays = 0, leaveDays = 0 for the backend generator unless we query all leaves
-      // We'll keep the logic simple for this backend task
-      const unpaidDays = 0;
-      const leaveDays = 0;
-      const presentDays = 22; // default 22 working days
       
-      const claimsAmount = 0; // if we want to fetch benefit claims, we can
-      
-      const allowance = baseAllowance + claimsAmount;
-      const bonus = roleKey === 'manager' ? 200 : 0;
-      const unpaidDeduction = Math.round((basic / 22) * unpaidDays);
-      const pf = Math.round(unpaidDeduction * 0.4);
-      const tax = Math.round(unpaidDeduction * 0.6) + Math.round(basic * 0.12);
-      
-      const net = Math.max(0, basic + allowance + bonus - pf - tax);
+      if (existingSnapshots.some(p => p.employeeId === emp.employeeProfile.id && p.status !== 'Draft')) {
+        skipped++;
+        continue;
+      }
 
-      await prisma.payslip.create({
-        data: {
-          employeeId: emp.employeeProfile.id,
-          month: generateMonth,
-          basic,
-          hra: 0,
-          allowance,
-          bonus,
-          pf,
-          tax,
-          netPay: net,
-          status: 'Draft',
-          paymentDate: null,
-          currency: 'USD'
-        }
-      });
-      newlyGenerated++;
+      try {
+        await generatePayrollSnapshot(emp.employeeProfile.id, generateMonth, emp.organizationId);
+        newlyGenerated++;
+      } catch (error) {
+        console.error(`Error generating payroll for ${emp.employeeProfile.id}:`, error);
+        skipped++;
+      }
     }
 
     res.status(200).json({ success: true, message: 'Payroll generated successfully.', newlyGenerated, skipped });

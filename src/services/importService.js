@@ -677,6 +677,34 @@ const executeImport = async (validData, entity, context) => {
             console.error(`Failed to import payroll row:`, err.message);
           }
         }
+      } else if (entity === 'jobs') {
+        for (const row of chunk) {
+          try {
+            if (!row.title) continue;
+
+            const statusStr = row.status ? String(row.status).toLowerCase() : '';
+            const isActive = row.status ? (statusStr === 'published' || statusStr === 'active' || statusStr === 'open') : true;
+
+            await prisma.jobPost.create({
+              data: {
+                title: String(row.title),
+                department: row.department ? String(row.department) : 'General',
+                description: row.description ? String(row.description) : 'No description provided.',
+                requirements: row.requirements ? String(row.requirements) : '',
+                salaryRange: row.salaryRange ? String(row.salaryRange) : null,
+                location: row.location ? String(row.location) : null,
+                jobType: row.jobType ? String(row.jobType) : 'Full Time',
+                experience: row.experience ? String(row.experience) : null,
+                openings: row.openings ? parseInt(row.openings, 10) || 1 : 1,
+                status: row.status ? String(row.status) : 'Published',
+                isActive: isActive
+              }
+            });
+            totalInserted++;
+          } catch (err) {
+            console.error(`Failed to import job row:`, err.message);
+          }
+        }
       }
     } catch (error) {
       console.error(`Chunk insertion failed for ${entity}:`, error);

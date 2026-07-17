@@ -24,7 +24,7 @@ const {
 const { getHRReports } = require('../controllers/reportsController');
 
 const {
-  getCompensationProfile, updateCompensationProfile, runPayroll, getPayrollSnapshots,
+  getCompensationProfile, updateCompensationProfile, runPayroll, runPayrollBatch, getPayrollSnapshots,
   finalizePayrollSnapshot, getHRIncrementRequests, approveHRIncrementRequest, rejectHRIncrementRequest
 } = require('../controllers/compensationController');
 
@@ -41,6 +41,7 @@ router.delete('/jobs/:id', deleteJob);
 router.get('/compensation/:employeeId', getCompensationProfile);
 router.put('/compensation/:employeeId', updateCompensationProfile);
 router.post('/payroll/run', runPayroll);
+router.post('/payroll/run-batch', runPayrollBatch);
 router.get('/payroll/snapshots', getPayrollSnapshots);
 router.patch('/payroll/:id/finalize', finalizePayrollSnapshot);
 
