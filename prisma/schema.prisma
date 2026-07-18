@@ -154,6 +154,7 @@ model Organization {
   workCalendars      WorkCalendar[]
   leavePolicies      LeavePolicy[]
   attendancePolicy   AttendancePolicy?
+  @@map("organization")
 }
 
 // ============================================================
@@ -188,6 +189,7 @@ model User {
   documents        Document[]
   notifications    Notification[]
   policyAcknowledgments PolicyAcknowledgment[]
+  @@map("user")
 }
 
 // ============================================================
@@ -205,6 +207,7 @@ model Department {
   organizationId String
   organization   Organization      @relation(fields: [organizationId], references: [id])
   employees      EmployeeProfile[]
+  @@map("department")
 }
 
 // ============================================================
@@ -280,6 +283,7 @@ model EmployeeProfile {
   overtimePolicy          OvertimePolicy?     @relation(fields: [overtimePolicyId], references: [id])
   salaryType              String              @default("Monthly")
   hourlyRate              Float?
+  @@map("employeeprofile")
 }
 
 // ============================================================
@@ -308,6 +312,7 @@ model CandidateProfile {
   resumeDownloads   Int      @default(0)
 
   applications JobApplication[]
+  @@map("candidateprofile")
 }
 
 // ============================================================
@@ -330,6 +335,7 @@ model JobPost {
   updatedAt    DateTime         @updatedAt
 
   applications JobApplication[]
+  @@map("jobpost")
 }
 
 // ============================================================
@@ -354,6 +360,7 @@ model JobApplication {
   employeeProfile EmployeeProfile?
   exitLifecycle   ExitLifecycle?
   lifecycleStatus LifecycleStatus? @default(APPLIED)
+  @@map("jobapplication")
 }
 
 // ============================================================
@@ -377,6 +384,7 @@ model Interview {
 
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+  @@map("interview")
 }
 
 // ============================================================
@@ -400,6 +408,7 @@ model Shift {
   
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  @@map("shift")
 }
 
 model OvertimePolicy {
@@ -418,6 +427,7 @@ model OvertimePolicy {
 
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  @@map("overtimepolicy")
 }
 
 // ============================================================
@@ -445,6 +455,7 @@ model AttendanceLog {
   isHalfDay        Boolean   @default(false)
 
   createdAt        DateTime  @default(now())
+  @@map("attendancelog")
 }
 
 // ============================================================
@@ -459,6 +470,7 @@ model LeavePolicy {
   organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+  @@map("leavepolicy")
 }
 
 model LeaveRequest {
@@ -476,6 +488,7 @@ model LeaveRequest {
   emergencyContact String?
 
   createdAt        DateTime    @default(now())
+  @@map("leaverequest")
 }
 
 // ============================================================
@@ -499,6 +512,7 @@ model Payslip {
   currency    String          @default("USD")
 
   createdAt   DateTime        @default(now())
+  @@map("payslip")
 }
 
 // ============================================================
@@ -537,6 +551,7 @@ model BenefitClaim {
   approvalHistory      String?         @db.LongText // JSON tracking timeline
 
   claimedAt  DateTime        @default(now())
+  @@map("benefitclaim")
 }
 
 // ============================================================
@@ -554,6 +569,7 @@ model PerformanceGoal {
 
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+  @@map("performancegoal")
 }
 
 // ============================================================
@@ -572,6 +588,7 @@ model Task {
 
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
+  @@map("task")
 }
 
 // ============================================================
@@ -589,6 +606,7 @@ model SupportTicket {
 
   createdAt DateTime        @default(now())
   messages  TicketMessage[]
+  @@map("supportticket")
 }
 
 // ============================================================
@@ -605,6 +623,7 @@ model TicketMessage {
   text          String        @db.Text
   attachmentUrl String?       @db.Text
   createdAt     DateTime      @default(now())
+  @@map("ticketmessage")
 }
 
 // ============================================================
@@ -620,6 +639,7 @@ model AuditLog {
   ipAddress String?
 
   createdAt DateTime @default(now())
+  @@map("auditlog")
 }
 
 // ============================================================
@@ -651,6 +671,7 @@ model Policy {
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
+  @@map("policy")
 }
 
 // ============================================================
@@ -665,6 +686,7 @@ model PolicyAcknowledgment {
   createdAt DateTime @default(now())
 
   @@unique([policyId, userId])
+  @@map("policyacknowledgment")
 }
 
 // ============================================================
@@ -690,6 +712,7 @@ model CustomRole {
 
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
+  @@map("customrole")
 }
 
 // ============================================================
@@ -708,6 +731,7 @@ model Holiday {
   description String?      @db.Text
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+  @@map("holiday")
 }
 
 // ============================================================
@@ -730,6 +754,7 @@ model BenefitPlan {
   updatedAt       DateTime @updatedAt
 
   employeeBenefits EmployeeBenefit[]
+  @@map("benefitplan")
 }
 
 // ============================================================
@@ -744,6 +769,7 @@ model AiModule {
   settings   String   @db.Text // JSON string
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  @@map("aimodule")
 }
 
 model AiLog {
@@ -751,6 +777,7 @@ model AiLog {
   label     String
   type      String
   timestamp DateTime @default(now())
+  @@map("ailog")
 }
 
 // ============================================================
@@ -766,6 +793,7 @@ model Integration {
   icon      String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@map("integration")
 }
 
 model BillingPlan {
@@ -777,6 +805,7 @@ model BillingPlan {
   addons      String   @default("[]") // JSON array of add‑on names
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  @@map("billingplan")
 }
 
 model Invoice {
@@ -787,6 +816,7 @@ model Invoice {
   status    String   // Paid | Refunded | Unpaid
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@map("invoice")
 }
 
 // ============================================================
@@ -801,6 +831,7 @@ model Announcement {
   content   String   @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@map("announcement")
 }
 
 // ============================================================
@@ -816,6 +847,7 @@ model Document {
   url       String   @db.Text
   date      String
   createdAt DateTime @default(now())
+  @@map("document")
 }
 
 // ============================================================
@@ -830,6 +862,7 @@ model EmployeeSkill {
   level      Int             @default(0) // percentage 0-100
   createdAt  DateTime        @default(now())
   updatedAt  DateTime        @updatedAt
+  @@map("employeeskill")
 }
 
 // ============================================================
@@ -845,6 +878,7 @@ model PerformanceReview {
   rating     String
   text       String          @db.Text
   createdAt  DateTime        @default(now())
+  @@map("performancereview")
 }
 
 // ============================================================
@@ -885,6 +919,7 @@ model GlobalSettings {
   reimbursementFinalApprovalRole   String  @default("ADMIN")
 
   updatedAt           DateTime @updatedAt
+  @@map("globalsettings")
 }// ============================================================
 // 29. Offer Model
 // ============================================================
@@ -900,6 +935,7 @@ model Offer {
   sentDate      String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  @@map("offer")
 }
 
 // ============================================================
@@ -921,6 +957,7 @@ model Onboarding {
   avatar      String?  @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  @@map("onboarding")
 }
 
 // ============================================================
@@ -962,6 +999,7 @@ model ExitLifecycle {
   
   createdAt             DateTime        @default(now())
   updatedAt             DateTime        @updatedAt
+  @@map("exitlifecycle")
 }
 
 // ============================================================
@@ -986,6 +1024,7 @@ model Notification {
   metadata  Json?
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+  @@map("notification")
 }
 
 
@@ -1007,6 +1046,7 @@ model DemoBooking {
   status String @default("Pending")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  @@map("demobooking")
 }
 
 model PricingPlan {
@@ -1031,6 +1071,7 @@ model PricingPlan {
   createdAt    DateTime         @default(now())
   updatedAt    DateTime         @updatedAt
   features     PricingFeature[]
+  @@map("pricingplan")
 }
 
 model PricingFeature {
@@ -1039,6 +1080,7 @@ model PricingFeature {
   pricingPlan   PricingPlan @relation(fields: [pricingPlanId], references: [id], onDelete: Cascade)
   feature       String
   displayOrder  Int         @default(0)
+  @@map("pricingfeature")
 }
 
 // ============================================================
@@ -1066,6 +1108,7 @@ model CompensationProfile {
   version          Int             @default(1)
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("compensationprofile")
 }
 
 model CompensationVersion {
@@ -1080,6 +1123,7 @@ model CompensationVersion {
   effectiveDate    DateTime
   timestamp        DateTime        @default(now())
   version          Int
+  @@map("compensationversion")
 }
 
 model SalaryBand {
@@ -1094,6 +1138,7 @@ model SalaryBand {
   updatedAt        DateTime        @updatedAt
 
   compensations    CompensationProfile[]
+  @@map("salaryband")
 }
 
 model SalaryComponent {
@@ -1120,6 +1165,7 @@ model SalaryComponent {
 
   employeeMappings EmployeeSalaryComponent[]
   structureMappings SalaryStructureComponent[]
+  @@map("salarycomponent")
 }
 
 model EmployeeSalaryComponent {
@@ -1133,6 +1179,7 @@ model EmployeeSalaryComponent {
   effectiveDate    DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("employeesalarycomponent")
 }
 
 model DeductionRule {
@@ -1150,6 +1197,7 @@ model DeductionRule {
   updatedAt        DateTime        @updatedAt
 
   employeeMappings EmployeeDeduction[]
+  @@map("deductionrule")
 }
 
 model EmployeeDeduction {
@@ -1163,6 +1211,7 @@ model EmployeeDeduction {
   effectiveDate    DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("employeededuction")
 }
 
 model TaxRule {
@@ -1176,6 +1225,7 @@ model TaxRule {
   status           String          @default("Active")
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("taxrule")
 }
 
 model EmployeeBenefit {
@@ -1188,6 +1238,7 @@ model EmployeeBenefit {
   enrollmentDate   DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("employeebenefit")
 }
 
 model Bonus {
@@ -1202,6 +1253,7 @@ model Bonus {
   status           String          @default("Pending") // Pending, Approved, Paid
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("bonus")
 }
 
 model SalaryIncrementRequest {
@@ -1215,6 +1267,7 @@ model SalaryIncrementRequest {
   workflowId       String?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("salaryincrementrequest")
 }
 
 model ApprovalWorkflow {
@@ -1227,6 +1280,7 @@ model ApprovalWorkflow {
   updatedAt        DateTime        @updatedAt
 
   steps            ApprovalStep[]
+  @@map("approvalworkflow")
 }
 
 model ApprovalStep {
@@ -1237,6 +1291,7 @@ model ApprovalStep {
   approverRole     String          // e.g. "MANAGER", "HR", "ADMIN"
   isRequired       Boolean         @default(true)
   createdAt        DateTime        @default(now())
+  @@map("approvalstep")
 }
 
 model ApprovalLog {
@@ -1249,6 +1304,7 @@ model ApprovalLog {
   status           String          
   comments         String?         @db.Text
   createdAt        DateTime        @default(now())
+  @@map("approvallog")
 }
 
 model AttendancePolicy {
@@ -1264,6 +1320,7 @@ model AttendancePolicy {
 
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
+  @@map("attendancepolicy")
 }
 
 model PayrollConfiguration {
@@ -1275,6 +1332,7 @@ model PayrollConfiguration {
   calculationBase  String          @default("Fixed Days") 
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("payrollconfiguration")
 }
 
 model PayrollSnapshot {
@@ -1309,6 +1367,7 @@ model PayrollSnapshot {
   updatedAt        DateTime        @updatedAt
 
   items            PayrollItem[]
+  @@map("payrollsnapshot")
 }
 
 model PayrollItem {
@@ -1320,6 +1379,7 @@ model PayrollItem {
   type             String          // Earning, Deduction, Employer Contribution
   amount           Float
   createdAt        DateTime        @default(now())
+  @@map("payrollitem")
 }
 
 // ============================================================
@@ -1343,6 +1403,7 @@ model SalaryStructure {
 
   versions         SalaryStructureVersion[]
   compensations    CompensationProfile[]
+  @@map("salarystructure")
 }
 
 model SalaryStructureVersion {
@@ -1358,6 +1419,7 @@ model SalaryStructureVersion {
   components       SalaryStructureComponent[]
   compensations    CompensationProfile[]
   snapshots        PayrollSnapshot[]
+  @@map("salarystructureversion")
 }
 
 model SalaryStructureComponent {
@@ -1376,6 +1438,7 @@ model SalaryStructureComponent {
   
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+  @@map("salarystructurecomponent")
 }
 
 // ============================================================
@@ -1397,6 +1460,7 @@ model WorkCalendar {
   holidays                 Holiday[]
   versions                 WorkCalendarVersion[]
   assignments              WorkCalendarAssignment[]
+  @@map("workcalendar")
 }
 
 model WorkCalendarVersion {
@@ -1407,6 +1471,7 @@ model WorkCalendarVersion {
   effectiveFrom DateTime              @default(now())
   effectiveTo   DateTime?
   weekends      WorkCalendarWeekend[]
+  @@map("workcalendarversion")
 }
 
 model WorkCalendarWeekend {
@@ -1415,6 +1480,7 @@ model WorkCalendarWeekend {
   version   WorkCalendarVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
   dayOfWeek String
   type      WeekendType         @default(FULL_DAY)
+  @@map("workcalendarweekend")
 }
 
 model WorkCalendarAssignment {
@@ -1425,4 +1491,5 @@ model WorkCalendarAssignment {
   entityId      String               
   effectiveFrom DateTime             @default(now())
   effectiveTo   DateTime?
+  @@map("workcalendarassignment")
 }
