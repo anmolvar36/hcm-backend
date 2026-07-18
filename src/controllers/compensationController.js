@@ -276,7 +276,7 @@ exports.approveHRIncrementRequest = async (req, res) => {
     });
 
     if (!request) return res.status(404).json({ message: 'Increment request not found.' });
-    if (request.status !== 'ManagerApproved') {
+    if (request.status !== 'ManagerApproved' && request.status !== 'Pending') {
       return res.status(400).json({ message: `Request status is ${request.status}, cannot approve.` });
     }
 

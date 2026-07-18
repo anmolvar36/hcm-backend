@@ -73,8 +73,11 @@ const processApproval = async (module, entityId, approverUserId, action, comment
     throw new Error("No pending approval found for this entity.");
   }
 
-  // Final check (middleware should have caught this, but we double check)
-  if (currentLog.approver.userId !== approverUserId) {
+  // Fetch user to check role bypass
+  const user = await prisma.user.findUnique({ where: { id: approverUserId } });
+  
+  // Final check: must be the exact designated approver, OR an Admin/Superadmin/HR
+  if (currentLog.approver.userId !== approverUserId && !['SUPERADMIN', 'ADMIN', 'HR'].includes(user?.role)) {
     throw new Error("Unauthorized approver.");
   }
 
@@ -98,25 +101,22 @@ const processApproval = async (module, entityId, approverUserId, action, comment
     return { status: 'Rejected', finalized: true };
   }
 
-  // If approved, proceed to next step
-  if (currentLog.nextStep) {
-    const workflow = await prisma.approvalWorkflow.findUnique({
-      where: { id: currentLog.workflowId },
-      include: { steps: true }
-    });
+  // If approved, evaluate the next step dynamically
+  const workflow = await prisma.approvalWorkflow.findUnique({
+    where: { id: currentLog.workflowId },
+    include: { steps: true }
+  });
 
-    const nextStepConfig = workflow.steps.find(s => s.sequence === currentLog.nextStep);
-    
+  const sortedSteps = workflow.steps.sort((a, b) => a.sequence - b.sequence);
+  const nextStepConfig = sortedSteps.find(s => s.sequence > currentLog.stepOrder);
+
+  if (nextStepConfig) {
     // We need the original requester userId to resolve context
-    // This can be fetched by looking at who created the first audit log or looking up the entity
-    // Since we don't know the entity structure generically, we pass a dummy or look up if needed.
-    // For Phase 1 we pass approverUserId as a fallback (which works for HR/Role based, but not MANAGER relative to requester).
+    // For Phase 1 we pass approverUserId as a fallback
     const nextApproverId = await resolveApprover(nextStepConfig, approverUserId, workflow.organizationId);
-    
-    // Find next-next step
-    const sortedSteps = workflow.steps.sort((a,b) => a.sequence - b.sequence);
-    const nextStepIndex = sortedSteps.findIndex(s => s.sequence === currentLog.nextStep);
-    const nextNextStepSeq = (nextStepIndex + 1 < sortedSteps.length) ? sortedSteps[nextStepIndex + 1].sequence : null;
+
+    const nextNextStepConfig = sortedSteps.find(s => s.sequence > nextStepConfig.sequence);
+    const nextNextStepSeq = nextNextStepConfig ? nextNextStepConfig.sequence : null;
 
     await prisma.approvalLog.create({
       data: {
