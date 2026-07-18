@@ -29,9 +29,10 @@ const login = async (req, res, next) => {
     // 1. Validate incoming request body
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) {
+      const errMsg = parsed.error.issues?.[0]?.message || parsed.error.errors?.[0]?.message || parsed.error.message || 'Validation failed';
       return res.status(400).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message },
+        error: { code: 'VALIDATION_ERROR', message: errMsg },
       });
     }
 
@@ -108,9 +109,10 @@ const register = async (req, res, next) => {
     // 1. Validate
     const parsed = registerSchema.safeParse(req.body);
     if (!parsed.success) {
+      const errMsg = parsed.error.issues?.[0]?.message || parsed.error.errors?.[0]?.message || parsed.error.message || 'Validation failed';
       return res.status(400).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message },
+        error: { code: 'VALIDATION_ERROR', message: errMsg },
       });
     }
 
