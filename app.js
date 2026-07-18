@@ -32,8 +32,12 @@ const PORT = process.env.PORT || 5000;
 // ---- GLOBAL MIDDLEWARES ----
 
 // CORS: Frontend (localhost:5173, 5174, 5175) ko backend se baat karne do
+const envClientUrls = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim())
+  : ['http://localhost:5173'];
+
 const allowedOrigins = [
-  process.env.CLIENT_URL || 'http://localhost:5173',
+  ...envClientUrls,
   'http://localhost:5174',
   'http://localhost:5175',
   'http://127.0.0.1:5173',
