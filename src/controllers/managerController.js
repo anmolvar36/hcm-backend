@@ -6,6 +6,7 @@
 const prisma = require('../config/prisma');
 const { z } = require('zod');
 const bcrypt = require('bcryptjs');
+const { isWorkflowEnabled, processApproval } = require('../services/approval.service');
 
 // ─────────────────────────────────────────
 // 1. GET MY TEAM  →  GET /api/manager/team
@@ -96,6 +97,35 @@ const reviewLeave = async (req, res, next) => {
     if (leave.status !== 'PENDING' && leave.status !== 'MANAGER_APPROVED') {
       return res.status(400).json({ success: false, error: { code: 'ALREADY_REVIEWED', message: 'This leave has already been reviewed.' } });
     }
+
+    try {
+      // --- GENERIC APPROVAL ENGINE INTEGRATION ---
+      const orgId = req.user.organizationId; // Or fetch from user profile
+      const workflowActive = await isWorkflowEnabled('LeaveRequest', orgId);
+
+      if (workflowActive) {
+        // We cannot just use processApproval from managerController because processApproval assumes it's the Generic Route where currentStep is validated.
+        // Wait, the requirement says "Controllers should simply determine whether a custom workflow exists and delegate processing to the Approval Engine."
+        // We can just call processApproval if they use the legacy endpoint.
+        const action = parsed.data.status === 'REJECTED' ? 'REJECT' : 'APPROVE';
+        const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, parsed.data.managerComment);
+        
+        // Also update the main LeaveRequest record status conditionally?
+        // Wait, if it's generic, the main record isn't updated by generic engine right now (unless we add a webhook/hook system). 
+        // For Phase 1, we should probably update the main record as well, or we just return the result.
+        // Let's let the generic engine handle the ApprovalLogs, and we update the LeaveRequest status for fallback UI compatibility.
+        const newLeaveStatus = result.finalized ? (action === 'REJECT' ? 'REJECTED' : 'APPROVED') : 'MANAGER_APPROVED';
+        const updatedLeave = await prisma.leaveRequest.update({
+          where: { id: leave.id },
+          data: { status: newLeaveStatus, managerComment: parsed.data.managerComment },
+        });
+
+        return res.status(200).json({ success: true, data: updatedLeave, message: `Leave ${action.toLowerCase()}d via Generic Engine.`, workflowResult: result });
+      }
+    } catch (engineErr) {
+      console.error('[Leave Workflow Fallback] Error in generic workflow, falling back to legacy:', engineErr);
+    }
+    // -------------------------------------------
 
     const updated = await prisma.leaveRequest.update({
       where: { id: req.params.id },

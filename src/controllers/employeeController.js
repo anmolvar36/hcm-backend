@@ -7,6 +7,7 @@ const prisma = require('../config/prisma');
 const { z } = require('zod');
 const bcrypt = require('bcryptjs');
 const calendarResolver = require('../utils/calendarResolver');
+const { isWorkflowEnabled, startWorkflow } = require('../services/approval.service');
 
 // ─────────────────────────────────────────
 // HELPER: Auto-provision Employee Profile
@@ -314,6 +315,20 @@ const applyLeave = async (req, res, next) => {
         status: 'PENDING',
       },
     });
+
+    try {
+      // --- GENERIC APPROVAL ENGINE INTEGRATION ---
+      const orgId = req.user.organizationId; // Or fetch from user profile if missing
+      const workflowActive = await isWorkflowEnabled('LeaveRequest', orgId);
+
+      if (workflowActive) {
+        await startWorkflow('LeaveRequest', leave.id, orgId, req.user.userId);
+        return res.status(201).json({ success: true, data: leave, message: 'Leave request submitted and workflow started.' });
+      }
+    } catch (engineErr) {
+      console.error('[Leave Workflow Fallback] Error starting generic workflow, falling back to legacy:', engineErr);
+    }
+    // -------------------------------------------
 
     try {
       const { createNotification } = require('../utils/notificationHelper');

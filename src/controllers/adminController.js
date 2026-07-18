@@ -7,6 +7,7 @@ const prisma = require('../config/prisma');
 const { z } = require('zod');
 const bcrypt = require('bcryptjs');
 const { ensureDefaultRoles } = require('../utils/roleSeeder');
+const { isWorkflowEnabled, processApproval } = require('../services/approval.service');
 const calendarResolver = require('../utils/calendarResolver');
 
 const roleToEnum = (role = '') => {
@@ -1501,13 +1502,37 @@ const getAllLeaves = async (req, res, next) => {
 const reviewLeave = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
-    const leave = await prisma.leaveRequest.update({
+    const { status, adminComment, hrComment } = req.body;
+    
+    const leave = await prisma.leaveRequest.findUnique({ where: { id } });
+    if (!leave) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Leave not found.' } });
+
+    // --- GENERIC APPROVAL ENGINE INTEGRATION ---
+    const orgId = req.user.organizationId;
+    const workflowActive = await isWorkflowEnabled('LeaveRequest', orgId);
+
+    if (workflowActive) {
+      const action = status === 'REJECTED' ? 'REJECT' : 'APPROVE';
+      const comment = adminComment || hrComment || '';
+      const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, comment);
+      
+      const newLeaveStatus = result.finalized ? (action === 'REJECT' ? 'REJECTED' : 'APPROVED') : 'MANAGER_APPROVED';
+      
+      const updatedLeave = await prisma.leaveRequest.update({
+        where: { id: leave.id },
+        data: { status: newLeaveStatus },
+        include: { user: { include: { employeeProfile: true } } }
+      });
+      return res.status(200).json({ success: true, data: updatedLeave, message: `Leave ${action.toLowerCase()}d via Generic Engine.`, workflowResult: result });
+    }
+
+    // --- LEGACY LOGIC ---
+    const updatedLeave = await prisma.leaveRequest.update({
       where: { id },
       data: { status },
       include: { user: { include: { employeeProfile: true } } }
     });
-    return res.status(200).json({ success: true, data: leave });
+    return res.status(200).json({ success: true, data: updatedLeave });
   } catch (err) { next(err); }
 };
 

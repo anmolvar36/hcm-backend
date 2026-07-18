@@ -1222,7 +1222,12 @@ model ApprovalWorkflow {
   organizationId   String
   organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name             String
-  module           String          // e.g. "SalaryIncrement", "BenefitEnrollment"
+  module           String          // e.g. "SalaryIncrement", "BenefitEnrollment", "LeaveRequest"
+  description      String?         @db.Text
+  version          Int             @default(1)
+  status           String          @default("Active")
+  isActive         Boolean         @default(true)
+  effectiveDate    DateTime?
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
@@ -1234,8 +1239,11 @@ model ApprovalStep {
   workflowId       String
   workflow         ApprovalWorkflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   stepOrder        Int
+  sequence         Int             @default(0)
+  approverType     String          @default("ROLE") // ROLE, CUSTOM_ROLE, SPECIFIC_USER, MANAGER
   approverRole     String          // e.g. "MANAGER", "HR", "ADMIN"
   isRequired       Boolean         @default(true)
+  canSkip          Boolean         @default(false)
   createdAt        DateTime        @default(now())
 }
 
@@ -1243,7 +1251,11 @@ model ApprovalLog {
   id               String          @id @default(uuid())
   entityId         String          
   entityType       String          
+  workflowId       String?
+  workflowVersion  Int?
   stepOrder        Int
+  previousStep     Int?
+  nextStep         Int?
   approverId       String
   approver         EmployeeProfile @relation(fields: [approverId], references: [id], onDelete: Cascade)
   status           String          
