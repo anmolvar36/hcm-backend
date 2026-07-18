@@ -16,11 +16,14 @@ const resolveApprover = async (step, requesterUserId, organizationId) => {
     return user.employeeProfile.id;
   }
 
-  // If the step is a generic role
   if (step.approverType === 'ROLE' || step.approverType === 'CUSTOM_ROLE') {
+    // Normalize role string (e.g. 'Admin' -> 'ADMIN', 'Reporting Manager' -> 'MANAGER')
+    let normalizedRole = step.approverRole ? step.approverRole.toUpperCase() : '';
+    if (normalizedRole === 'REPORTING MANAGER') normalizedRole = 'MANAGER';
+    
     // Basic logic for phase 1: finding a user with this role
     const user = await prisma.user.findFirst({
-      where: { role: step.approverRole, organizationId },
+      where: { role: normalizedRole, organizationId },
       include: { employeeProfile: true }
     });
     

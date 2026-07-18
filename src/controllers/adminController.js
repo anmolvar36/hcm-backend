@@ -1512,18 +1512,32 @@ const reviewLeave = async (req, res, next) => {
     const workflowActive = await isWorkflowEnabled('LeaveRequest', orgId);
 
     if (workflowActive) {
-      const action = status === 'REJECTED' ? 'REJECT' : 'APPROVE';
-      const comment = adminComment || hrComment || '';
-      const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, comment);
-      
-      const newLeaveStatus = result.finalized ? (action === 'REJECT' ? 'REJECTED' : 'APPROVED') : 'MANAGER_APPROVED';
-      
-      const updatedLeave = await prisma.leaveRequest.update({
-        where: { id: leave.id },
-        data: { status: newLeaveStatus },
-        include: { user: { include: { employeeProfile: true } } }
-      });
-      return res.status(200).json({ success: true, data: updatedLeave, message: `Leave ${action.toLowerCase()}d via Generic Engine.`, workflowResult: result });
+      try {
+        const action = status === 'REJECTED' ? 'REJECT' : 'APPROVE';
+        const comment = adminComment || hrComment || '';
+        const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, comment);
+        
+        let newLeaveStatus = 'MANAGER_APPROVED';
+        if (result.finalized) {
+          newLeaveStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED';
+        } else {
+          newLeaveStatus = req.user.role === 'HR' ? 'HR_APPROVED' : `${req.user.role}_APPROVED`;
+        }
+        
+        const updatedLeave = await prisma.leaveRequest.update({
+          where: { id: leave.id },
+          data: { status: newLeaveStatus },
+          include: { user: { include: { employeeProfile: true } } }
+        });
+        return res.status(200).json({ success: true, data: updatedLeave, message: `Leave ${action.toLowerCase()}d via Generic Engine.`, workflowResult: result });
+      } catch (workflowErr) {
+        if (workflowErr.message === "No pending approval found for this entity.") {
+          console.warn(`[Approval Engine] Skipping generic approval for ${leave.id}:`, workflowErr.message);
+          // Fallthrough to legacy logic
+        } else {
+          throw workflowErr;
+        }
+      }
     }
 
     // --- LEGACY LOGIC ---
