@@ -114,7 +114,19 @@ const reviewLeave = async (req, res, next) => {
         // Wait, if it's generic, the main record isn't updated by generic engine right now (unless we add a webhook/hook system). 
         // For Phase 1, we should probably update the main record as well, or we just return the result.
         // Let's let the generic engine handle the ApprovalLogs, and we update the LeaveRequest status for fallback UI compatibility.
-        const newLeaveStatus = result.finalized ? (action === 'REJECT' ? 'REJECTED' : 'APPROVED') : 'MANAGER_APPROVED';
+        let newLeaveStatus = 'MANAGER_APPROVED';
+        if (result.finalized) {
+          newLeaveStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED';
+        } else {
+          const nextRole = result.nextStepConfig?.approverRole?.toUpperCase() || '';
+          if (nextRole === 'HR') {
+            newLeaveStatus = 'MANAGER_APPROVED';
+          } else if (nextRole === 'ADMIN') {
+            newLeaveStatus = 'HR_APPROVED';
+          } else {
+            newLeaveStatus = 'Pending';
+          }
+        }
         const updatedLeave = await prisma.leaveRequest.update({
           where: { id: leave.id },
           data: { status: newLeaveStatus, managerComment: parsed.data.managerComment },
@@ -123,7 +135,11 @@ const reviewLeave = async (req, res, next) => {
         return res.status(200).json({ success: true, data: updatedLeave, message: `Leave ${action.toLowerCase()}d via Generic Engine.`, workflowResult: result });
       }
     } catch (engineErr) {
-      console.error('[Leave Workflow Fallback] Error in generic workflow, falling back to legacy:', engineErr);
+      if (engineErr.message === "No pending approval found for this entity.") {
+        console.warn('[Leave Workflow Fallback] No generic approval found, falling back to legacy.');
+      } else {
+        return res.status(400).json({ success: false, message: engineErr.message });
+      }
     }
     // -------------------------------------------
 

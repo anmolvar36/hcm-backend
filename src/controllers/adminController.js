@@ -1521,7 +1521,14 @@ const reviewLeave = async (req, res, next) => {
         if (result.finalized) {
           newLeaveStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED';
         } else {
-          newLeaveStatus = req.user.role === 'HR' ? 'HR_APPROVED' : `${req.user.role}_APPROVED`;
+          const nextRole = result.nextStepConfig?.approverRole?.toUpperCase() || '';
+          if (nextRole === 'HR') {
+            newLeaveStatus = 'MANAGER_APPROVED';
+          } else if (nextRole === 'ADMIN') {
+            newLeaveStatus = 'HR_APPROVED';
+          } else {
+            newLeaveStatus = 'Pending';
+          }
         }
         
         const updatedLeave = await prisma.leaveRequest.update({
@@ -1535,7 +1542,7 @@ const reviewLeave = async (req, res, next) => {
           console.warn(`[Approval Engine] Skipping generic approval for ${leave.id}:`, workflowErr.message);
           // Fallthrough to legacy logic
         } else {
-          throw workflowErr;
+          return res.status(400).json({ success: false, message: workflowErr.message });
         }
       }
     }

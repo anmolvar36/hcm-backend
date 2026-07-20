@@ -76,9 +76,24 @@ const processApproval = async (module, entityId, approverUserId, action, comment
   // Fetch user to check role bypass
   const user = await prisma.user.findUnique({ where: { id: approverUserId } });
   
-  // Final check: must be the exact designated approver, OR an Admin/Superadmin/HR
-  if (currentLog.approver.userId !== approverUserId && !['SUPERADMIN', 'ADMIN', 'HR'].includes(user?.role)) {
-    throw new Error("Unauthorized approver.");
+  // Fetch step config to see if the user's role matches the required role for this step
+  const stepConfig = await prisma.approvalStep.findFirst({
+    where: { workflowId: currentLog.workflowId, sequence: currentLog.stepOrder }
+  });
+
+  const isExactApprover = currentLog.approver.userId === approverUserId;
+  const isSuperAdmin = user?.role === 'SUPERADMIN';
+  const isAdmin = user?.role === 'ADMIN';
+  const isHR = user?.role === 'HR';
+  const isRoleMatch = stepConfig?.approverType === 'ROLE' && stepConfig?.approverRole?.toUpperCase() === user?.role?.toUpperCase();
+  
+  const stepRequiredRole = stepConfig?.approverRole?.toUpperCase() || '';
+  // HR can override steps as long as they don't require Admin or Superadmin
+  const isHROverride = isHR && !['ADMIN', 'SUPERADMIN'].includes(stepRequiredRole);
+
+  if (!isExactApprover && !isSuperAdmin && !isAdmin && !isRoleMatch && !isHROverride) {
+    const requiredRole = stepConfig?.approverRole || 'Designated Approver';
+    throw new Error(`Unauthorized approver. This step requires: ${requiredRole}`);
   }
 
   const newStatus = action === 'APPROVE' ? 'Approved' : 'Rejected';
@@ -132,7 +147,7 @@ const processApproval = async (module, entityId, approverUserId, action, comment
       }
     });
 
-    return { status: 'Advanced', finalized: false };
+    return { status: 'Advanced', finalized: false, nextStepConfig };
   }
 
   return { status: 'Finalized', finalized: true };
