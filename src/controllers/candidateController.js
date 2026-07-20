@@ -188,14 +188,24 @@ const updateCandidateProfile = async (req, res, next) => {
             const uploadPath = path.join(__dirname, '../../public/uploads', filename);
             fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
             fs.writeFileSync(uploadPath, fileBuffer);
-            return `http://localhost:5000/uploads/${filename}`;
+            console.log(`Saved file to ${uploadPath}`);
+            const baseUrl = process.env.BACKEND_URL || (req.protocol + '://' + req.get('host'));
+            return `${baseUrl}/uploads/${filename}`;
+          } else {
+            console.log("Base64 regex did not match for", filenamePrefix);
           }
         } catch (err) {
           console.error(`Failed to save uploaded ${filenamePrefix}:`, err);
         }
+      } else {
+         console.log(`${filenamePrefix} base64Str is empty or falsy`);
       }
       return fallbackUrl; // return what was passed (could be null for deletion or existing url)
     };
+
+    console.log("updateCandidateProfile called");
+    console.log("avatarBase64 present:", !!avatarBase64);
+    if (avatarBase64) console.log("avatarBase64 prefix:", avatarBase64.substring(0, 30));
 
     const finalAvatarUrl = handleBase64Upload(avatarBase64, avatarUrl !== undefined ? avatarUrl : profile.avatarUrl, 'avatar');
     const finalResumeUrl = handleBase64Upload(resumeBase64, resumeUrl !== undefined ? resumeUrl : profile.resumeUrl, 'resume');
