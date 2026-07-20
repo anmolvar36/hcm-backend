@@ -220,7 +220,7 @@ const getAllPlatformUsers = async (req, res, next) => {
 
     const users = await prisma.user.findMany({
       where: {
-        ...(role && { role }),
+        ...(role ? { role } : { role: { not: 'SUPERADMIN' } }),
         ...(isActive !== undefined && { isActive: isActive === 'true' }),
         ...(organizationId && { organizationId }),
       },
