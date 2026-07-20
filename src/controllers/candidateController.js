@@ -165,6 +165,7 @@ const updateCandidateProfile = async (req, res, next) => {
   try {
     const { 
       fullName, location, phone, dob, 
+      address, city, country, bio, role, currentSalary, noticePeriod,
       expectedSalary, experience, linkedin, portfolio, skills, resumeData,
       avatarUrl, resumeUrl, identityProofUrl, educationProofUrl,
       avatarBase64, resumeBase64, identityProofBase64, educationProofBase64
@@ -208,6 +209,13 @@ const updateCandidateProfile = async (req, res, next) => {
         location: location !== undefined ? location : undefined,
         phone: phone !== undefined ? phone : undefined,
         dob: dob ? new Date(dob) : undefined,
+        address: address !== undefined ? address : undefined,
+        city: city !== undefined ? city : undefined,
+        country: country !== undefined ? country : undefined,
+        bio: bio !== undefined ? bio : undefined,
+        role: role !== undefined ? role : undefined,
+        currentSalary: currentSalary !== undefined ? currentSalary : undefined,
+        noticePeriod: noticePeriod !== undefined ? noticePeriod : undefined,
         avatarUrl: finalAvatarUrl,
         resumeUrl: finalResumeUrl,
         identityProofUrl: finalIdentityUrl,

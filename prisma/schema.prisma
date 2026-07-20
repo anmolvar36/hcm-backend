@@ -305,6 +305,13 @@ model CandidateProfile {
   location          String?
   phone             String?
   dob               DateTime?
+  address           String?
+  city              String?
+  country           String?
+  bio               String?   @db.Text
+  role              String?
+  currentSalary     String?
+  noticePeriod      String?
   avatarUrl         String?
   resumeUrl         String?
   identityProofUrl  String?
