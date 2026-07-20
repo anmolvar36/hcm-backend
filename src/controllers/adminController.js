@@ -370,7 +370,7 @@ const createUser = async (req, res, next) => {
     });
 
     const passwordHash = await bcrypt.hash(data.password || 'password123', 10);
-    
+
     let validCustomRoleId = null;
     if (data.customRoleId && role !== 'SUPERADMIN') {
       const customRole = await prisma.customRole.findUnique({ where: { id: data.customRoleId } });
@@ -658,10 +658,10 @@ const generatePayslip = async (req, res, next) => {
     const logs = await prisma.attendanceLog.findMany({
       where: { userId: profile.userId }
     });
-    
+
     const targetMonthStr = month.toLowerCase();
     const isYYYYMM = /^\d{4}-\d{2}$/.test(month);
-    
+
     // --- INTEGRATE ENTERPRISE CALENDAR FOR WORKING DAYS ---
     let calendarWorkingDays = 0;
     let calendarDays = 0;
@@ -677,7 +677,7 @@ const generatePayslip = async (req, res, next) => {
         for (let day = 1; day <= daysInMonth; day++) {
           const checkDate = new Date(yyyy, mm - 1, day);
           const dayType = await calendarResolver.getDayType(profile.userId, checkDate);
-          
+
           if (dayType.type === 'WORKING_DAY') {
             calendarWorkingDays += 1;
           } else if (dayType.type === 'WEEKEND') {
@@ -693,10 +693,10 @@ const generatePayslip = async (req, res, next) => {
       }
     }
     // ------------------------------------------------------
-    
+
     let totalWorkedMin = 0;
     let totalOTMin = 0;
-    
+
     logs.forEach(log => {
       const d = new Date(log.date);
       let match = false;
@@ -711,7 +711,7 @@ const generatePayslip = async (req, res, next) => {
           match = true;
         }
       }
-      
+
       if (match) {
         totalWorkedMin += log.totalWorkedMin;
         totalOTMin += log.overtimeMinutes;
@@ -730,9 +730,9 @@ const generatePayslip = async (req, res, next) => {
       let hourlyRate = profile.hourlyRate || 0;
       if (!hourlyRate && profile.salaryType === 'Monthly') {
         const base = finalBasic + hra + allowance;
-        hourlyRate = base / 160; 
+        hourlyRate = base / 160;
       }
-      
+
       let otRateMultiplier = 1.0;
       if (profile.overtimePolicy) {
         otRateMultiplier = profile.overtimePolicy.weekdayMultiplier || 1.5;
@@ -740,12 +740,12 @@ const generatePayslip = async (req, res, next) => {
         const defPolicy = await prisma.overtimePolicy.findFirst({ where: { isDefault: true } });
         if (defPolicy) otRateMultiplier = defPolicy.weekdayMultiplier;
       }
-      
+
       const otHours = totalOTMin / 60;
       const otPay = otHours * hourlyRate * otRateMultiplier;
       finalBonus += otPay;
     }
-    
+
     const netPay = finalBasic + hra + allowance + finalBonus - pf - tax;
 
     // Check if a payslip already exists for this employee and month
@@ -932,7 +932,7 @@ const renewPolicy = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, category, department, owner, effectiveDate, expiryDate, version, requiresSignature, description, pdfName, pdfData } = req.body;
-    
+
     // Update the policy itself with new data
     const policy = await prisma.policy.update({
       where: { id },
@@ -951,7 +951,7 @@ const renewPolicy = async (req, res, next) => {
         ...(pdfData !== undefined && { pdfData }),
         // Reset acknowledgment string format (e.g. 0/50 instead of 45/50)
         // We will just set it to '0' initially, frontend logic will format it to `0/totalEmployees`
-        acknowledgments: '0' 
+        acknowledgments: '0'
       },
     });
 
@@ -978,9 +978,9 @@ const sendPolicyReminder = async (req, res, next) => {
       where: { policyId: id },
       select: { userId: true }
     });
-    
+
     const ackUserIds = acknowledgedUsers.map(a => a.userId);
-    
+
     // Find active employees who have NOT acknowledged it
     const pendingUsers = await prisma.user.findMany({
       where: {
@@ -992,7 +992,7 @@ const sendPolicyReminder = async (req, res, next) => {
 
     const { createNotification } = require('../utils/notificationHelper');
     let sentCount = 0;
-    
+
     for (const user of pendingUsers) {
       await createNotification({
         userId: user.id,
@@ -1013,7 +1013,7 @@ const sendPolicyReminder = async (req, res, next) => {
 const getRoles = async (req, res, next) => {
   try {
     await ensureDefaultRoles();
-    const customRoles = await prisma.customRole.findMany({ 
+    const customRoles = await prisma.customRole.findMany({
       orderBy: { name: 'asc' },
       include: {
         _count: {
@@ -1024,10 +1024,10 @@ const getRoles = async (req, res, next) => {
     const mapped = customRoles.map(r => {
       let parsedPerms = r.permissions || {};
       if (typeof parsedPerms === 'string') {
-        try { parsedPerms = JSON.parse(parsedPerms); } catch (e) {}
+        try { parsedPerms = JSON.parse(parsedPerms); } catch (e) { }
       }
-      return { 
-        ...r, 
+      return {
+        ...r,
         permissions: parsedPerms,
         assignedUsersCount: r._count?.users || 0
       };
@@ -1040,7 +1040,7 @@ const getRoles = async (req, res, next) => {
 const createRole = async (req, res, next) => {
   try {
     const { name, description, isCustom, permissions, inheritsFrom, landingPage, assignedUsers } = req.body;
-    
+
     const role = await prisma.$transaction(async (tx) => {
       const createdRole = await tx.customRole.create({
         data: {
@@ -1074,10 +1074,10 @@ const createRole = async (req, res, next) => {
         }
       });
     }
-    
+
     let parsedPerms = role.permissions;
     if (typeof parsedPerms === 'string') {
-      try { parsedPerms = JSON.parse(parsedPerms); } catch(e) {}
+      try { parsedPerms = JSON.parse(parsedPerms); } catch (e) { }
     }
     return res.status(201).json({ success: true, data: { ...role, permissions: parsedPerms } });
   } catch (err) { next(err); }
@@ -1087,7 +1087,7 @@ const updateRole = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, description, isCustom, permissions, inheritsFrom, landingPage, status, assignedUsers } = req.body;
-    
+
     const existing = await prisma.customRole.findUnique({ where: { id } });
 
     const role = await prisma.$transaction(async (tx) => {
@@ -1109,7 +1109,7 @@ const updateRole = async (req, res, next) => {
       if (Array.isArray(assignedUsers)) {
         // 1. Remove this customRoleId from users who are no longer in the assignedUsers list
         await tx.user.updateMany({
-          where: { 
+          where: {
             customRoleId: id,
             id: { notIn: assignedUsers }
           },
@@ -1141,7 +1141,7 @@ const updateRole = async (req, res, next) => {
 
     let parsedPerms = role.permissions;
     if (typeof parsedPerms === 'string') {
-      try { parsedPerms = JSON.parse(parsedPerms); } catch(e) {}
+      try { parsedPerms = JSON.parse(parsedPerms); } catch (e) { }
     }
     return res.status(200).json({ success: true, data: { ...role, permissions: parsedPerms } });
   } catch (err) { next(err); }
@@ -1150,9 +1150,9 @@ const updateRole = async (req, res, next) => {
 const deleteRole = async (req, res, next) => {
   try {
     const { id } = req.params;
-    
+
     // Hard delete the custom role from the DB. Prisma's onDelete: SetNull will clear customRoleId on affected users automatically.
-    const role = await prisma.customRole.delete({ 
+    const role = await prisma.customRole.delete({
       where: { id }
     });
 
@@ -1214,7 +1214,7 @@ const deleteHoliday = async (req, res, next) => {
 
 const getBenefitPlans = async (req, res, next) => {
   try {
-    const plans = await prisma.benefitPlan.findMany({ 
+    const plans = await prisma.benefitPlan.findMany({
       orderBy: { name: 'asc' },
       include: {
         employeeBenefits: true
@@ -1503,7 +1503,7 @@ const reviewLeave = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, adminComment, hrComment } = req.body;
-    
+
     const leave = await prisma.leaveRequest.findUnique({ where: { id } });
     if (!leave) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Leave not found.' } });
 
@@ -1516,7 +1516,7 @@ const reviewLeave = async (req, res, next) => {
         const action = status === 'REJECTED' ? 'REJECT' : 'APPROVE';
         const comment = adminComment || hrComment || '';
         const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, comment);
-        
+
         let newLeaveStatus = 'MANAGER_APPROVED';
         if (result.finalized) {
           newLeaveStatus = action === 'REJECT' ? 'REJECTED' : 'APPROVED';
@@ -1530,7 +1530,7 @@ const reviewLeave = async (req, res, next) => {
             newLeaveStatus = 'Pending';
           }
         }
-        
+
         const updatedLeave = await prisma.leaveRequest.update({
           where: { id: leave.id },
           data: { status: newLeaveStatus },

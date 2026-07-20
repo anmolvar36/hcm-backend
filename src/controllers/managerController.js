@@ -109,7 +109,7 @@ const reviewLeave = async (req, res, next) => {
         // We can just call processApproval if they use the legacy endpoint.
         const action = parsed.data.status === 'REJECTED' ? 'REJECT' : 'APPROVE';
         const result = await processApproval('LeaveRequest', leave.id, req.user.userId, action, parsed.data.managerComment);
-        
+
         // Also update the main LeaveRequest record status conditionally?
         // Wait, if it's generic, the main record isn't updated by generic engine right now (unless we add a webhook/hook system). 
         // For Phase 1, we should probably update the main record as well, or we just return the result.
@@ -655,14 +655,14 @@ const getTeamReviews = async (req, res, next) => {
 
     const reviews = await prisma.performanceReview.findMany({
       where: { employeeId: { in: employeeIds } },
-      include: { 
-        employee: { 
-          select: { 
-            fullName: true, 
+      include: {
+        employee: {
+          select: {
+            fullName: true,
             id: true,
             user: { select: { role: true } }
-          } 
-        } 
+          }
+        }
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -749,7 +749,7 @@ const requestSalaryIncrement = async (req, res, next) => {
 
     const employee = await prisma.employeeProfile.findUnique({ where: { id: employeeId } });
     if (!employee) return res.status(404).json({ success: false, message: 'Employee not found.' });
-    
+
     if (employee.managerId !== managerProfile.id) {
       return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager.' });
     }
@@ -994,7 +994,7 @@ const reviewManagerReimbursement = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { status, comment } = req.body; // status: 'Approved', 'Rejected'
-    
+
     if (!['Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ success: false, error: { message: 'Invalid status' } });
     }
@@ -1009,10 +1009,10 @@ const reviewManagerReimbursement = async (req, res, next) => {
     }
 
     const overallStatus = status === 'Approved' ? 'Pending Final Approval' : 'Rejected by Manager';
-    
+
     let history = [];
     if (claim.approvalHistory) {
-      try { history = JSON.parse(claim.approvalHistory); } catch(e) {}
+      try { history = JSON.parse(claim.approvalHistory); } catch (e) { }
     }
     history.push({
       action: status === 'Approved' ? 'Manager Approved' : 'Manager Rejected',
@@ -1077,6 +1077,10 @@ module.exports = {
   getIncrementRequests, approveIncrementRequest, rejectIncrementRequest,
   getResignations, reviewResignation,
   getManagerReimbursements,
+  reviewManagerReimbursement,
+  requestSalaryIncrement
+};
+getManagerReimbursements,
   reviewManagerReimbursement,
   requestSalaryIncrement
 };
