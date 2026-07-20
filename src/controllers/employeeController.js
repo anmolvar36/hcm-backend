@@ -836,7 +836,8 @@ const uploadDocument = async (req, res, next) => {
       return res.status(400).json({ success: false, error: { message: 'Name and Category are required' } });
     }
 
-    let url = 'http://localhost:5000/uploads/placeholder.pdf';
+    const baseUrl = process.env.BACKEND_URL || (req.protocol + '://' + req.get('host'));
+    let url = `${baseUrl}/uploads/placeholder.pdf`;
     if (fileBase64) {
       const fs = require('fs');
       const path = require('path');
@@ -846,7 +847,7 @@ const uploadDocument = async (req, res, next) => {
       const uploadPath = path.join(__dirname, '../../public/uploads', filename);
       fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
       fs.writeFileSync(uploadPath, fileBuffer);
-      url = `http://localhost:5000/uploads/${filename}`;
+      url = `${baseUrl}/uploads/${filename}`;
     }
 
     const doc = await prisma.document.create({
