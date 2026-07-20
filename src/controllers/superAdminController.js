@@ -74,7 +74,7 @@ const getPlatformStats = async (req, res, next) => {
     let mrr = 0;
     let arr = 0;
     let planDistribution = { enterprise: 0, pro: 0, team: 0 };
-    
+
     organizationsWithPlans.forEach(org => {
       if (org.pricingPlan) {
         if (org.pricingPlan.billingCycle?.toLowerCase() === 'yearly') {
@@ -86,13 +86,13 @@ const getPlatformStats = async (req, res, next) => {
         }
 
         const planName = org.pricingPlan.name.toLowerCase();
-        
+
         if (planName.includes('enterprise') || planName.includes('custom')) {
-            planDistribution.enterprise += 1;
+          planDistribution.enterprise += 1;
         } else if (planName.includes('pro') || planName.includes('growth')) {
-            planDistribution.pro += 1;
+          planDistribution.pro += 1;
         } else {
-            planDistribution.team += 1;
+          planDistribution.team += 1;
         }
       }
     });
@@ -231,10 +231,10 @@ const getAllPlatformUsers = async (req, res, next) => {
         isActive: true,
         createdAt: true,
         organization: { select: { name: true } },
-        employeeProfile: { 
-          select: { 
+        employeeProfile: {
+          select: {
             id: true,
-            fullName: true, 
+            fullName: true,
             employeeId: true,
             compensationProfile: {
               select: {
@@ -242,7 +242,7 @@ const getAllPlatformUsers = async (req, res, next) => {
                 monthlyCTC: true
               }
             }
-          } 
+          }
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -394,7 +394,7 @@ const resetUserPassword = async (req, res, next) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    
+
     // In a real scenario, this would send an email with a reset token.
     // For now, we'll just log it to the audit log to prove it's a backend action.
     if (req.user) {
@@ -482,12 +482,32 @@ const getAnalytics = async (req, res, next) => {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - days);
 
-    const [newUsers, newOrganizations, newJobs, newTickets] = await Promise.all([
+    const [newUsers, newOrganizations, newJobs, newTickets, payrollCount, attendanceCount, aiCount, benefitsCount, complianceCount, recentAudits] = await Promise.all([
       prisma.user.count({ where: { createdAt: { gte: startDate } } }),
       prisma.organization.count({ where: { createdAt: { gte: startDate } } }),
       prisma.jobPost.count({ where: { createdAt: { gte: startDate } } }),
-      prisma.supportTicket.count({ where: { createdAt: { gte: startDate } } })
+      prisma.supportTicket.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.payslip.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.attendanceLog.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.aiLog.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.employeeBenefit.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.auditLog.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.auditLog.findMany({
+        take: 4,
+        orderBy: { createdAt: 'desc' },
+        include: { user: { select: { role: true } } }
+      })
     ]);
+
+    // Calculate ecosystem percentages
+    const totalModuleActivity = payrollCount + attendanceCount + aiCount + benefitsCount + complianceCount || 1;
+    const moduleUtilization = {
+      payroll: Math.round((payrollCount / totalModuleActivity) * 100),
+      attendance: Math.round((attendanceCount / totalModuleActivity) * 100),
+      ai: Math.round((aiCount / totalModuleActivity) * 100),
+      benefits: Math.round((benefitsCount / totalModuleActivity) * 100),
+      compliance: Math.round((complianceCount / totalModuleActivity) * 100),
+    };
 
     return res.status(200).json({
       success: true,
@@ -496,7 +516,9 @@ const getAnalytics = async (req, res, next) => {
         newOrganizations,
         newJobs,
         newTickets,
-        timeRange
+        timeRange,
+        moduleUtilization,
+        recentAudits
       }
     });
   } catch (err) { next(err); }
@@ -655,13 +677,13 @@ const updateUser = async (req, res, next) => {
       data: {
         ...(email && { email }),
         ...(role && { role: roleToEnum(role) }),
-        ...(status && { status, isActive: status === 'Active' }),
+        ...(status && { status, isActive: status.toLowerCase() === 'active' }),
         ...(orgId !== undefined && { organizationId: orgId }),
         employeeProfile: existingUser.employeeProfile ? {
           update: empData
         } : {
           create: {
-            fullName: name || email.split('@')[0],
+            fullName: name || (email || existingUser.email).split('@')[0],
             employeeId: 'EMP-' + Math.floor(Math.random() * 100000),
             ...empData
           }
@@ -825,7 +847,7 @@ const getPayrollHistory = async (req, res, next) => {
       for (const item of p.items) {
         if (item.code === 'BASE' || item.name.toLowerCase().includes('basic')) basic += item.amount;
         else if (item.type === 'Earning' || item.type === 'Allowance') allowance += item.amount;
-        
+
         if (item.name.toLowerCase().includes('provident fund') || item.code === 'PF') pf += item.amount;
         if (item.code.startsWith('TAX_') || item.name.toLowerCase().includes('tax')) tax += item.amount;
       }
@@ -960,7 +982,7 @@ const bulkApprovePayslips = async (req, res, next) => {
 const generatePayroll = async (req, res, next) => {
   try {
     const { generateMonth } = req.body;
-    
+
     if (!generateMonth) {
       return res.status(400).json({ success: false, message: 'generateMonth is required.' });
     }
@@ -982,7 +1004,7 @@ const generatePayroll = async (req, res, next) => {
         skipped++;
         continue;
       }
-      
+
       if (existingSnapshots.some(p => p.employeeId === emp.employeeProfile.id && p.status !== 'Draft')) {
         skipped++;
         continue;
