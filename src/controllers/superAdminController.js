@@ -586,13 +586,14 @@ const createUser = async (req, res, next) => {
       department: z.string().optional(),
       departmentId: z.string().optional(),
       status: z.string().optional(),
+      password: z.string().optional(),
     });
 
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: { message: parsed.error.issues?.[0]?.message || 'Validation error' } });
     }
-    const { name, email, role, department } = parsed.data;
+    const { name, email, role, department, password } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) return res.status(409).json({ success: false, error: { message: 'Email already exists' } });
@@ -604,7 +605,7 @@ const createUser = async (req, res, next) => {
       if (org) orgId = org.id;
     }
 
-    const passwordHash = await bcrypt.hash('password123', 10);
+    const passwordHash = await bcrypt.hash(password || 'password123', 10);
     const user = await prisma.user.create({
       data: {
         email,
@@ -639,7 +640,7 @@ const createUser = async (req, res, next) => {
 
 const updateUser = async (req, res, next) => {
   try {
-    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, salaryType, hourlyRate, departmentId } = req.body;
+    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, salaryType, hourlyRate, departmentId, password } = req.body;
     let orgId = undefined;
     if (department) {
       const org = await prisma.organization.findFirst({ where: { name: department } });
@@ -682,6 +683,7 @@ const updateUser = async (req, res, next) => {
         ...(role && { role: roleToEnum(role) }),
         ...(status && { status, isActive: status.toLowerCase() === 'active' }),
         ...(orgId !== undefined && { organizationId: orgId }),
+        ...(password && { passwordHash: await bcrypt.hash(password, 10) }),
         employeeProfile: existingUser.employeeProfile ? {
           update: empData
         } : {
