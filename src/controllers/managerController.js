@@ -1,3 +1,4 @@
+
 // ============================================================
 // Manager Controller
 // ============================================================
@@ -1077,10 +1078,6 @@ module.exports = {
   getIncrementRequests, approveIncrementRequest, rejectIncrementRequest,
   getResignations, reviewResignation,
   getManagerReimbursements,
-  reviewManagerReimbursement,
-  requestSalaryIncrement
-};
-getManagerReimbursements,
   reviewManagerReimbursement,
   requestSalaryIncrement
 };
