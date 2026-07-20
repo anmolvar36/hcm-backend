@@ -13,16 +13,7 @@ const fs = require('fs/promises');
 const path = require('path');
 const { generatePayrollSnapshot } = require('../services/payrollEngineService');
 
-const roleToEnum = (roleStr) => {
-  if (!roleStr) return 'EMPLOYEE';
-  const upper = roleStr.toUpperCase().replace(/\s+/g, '_');
-  if (upper.includes('SUPER')) return 'SUPERADMIN';
-  if (upper.includes('ADMIN')) return 'ADMIN';
-  if (upper.includes('HR')) return 'HR';
-  if (upper.includes('MANAGER')) return 'MANAGER';
-  if (upper.includes('CANDIDATE')) return 'CANDIDATE';
-  return 'EMPLOYEE';
-};
+
 
 // ─────────────────────────────────────────
 // PLATFORM STATS  →  GET /api/superadmin/stats
