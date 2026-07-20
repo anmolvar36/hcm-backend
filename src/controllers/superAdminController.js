@@ -584,6 +584,7 @@ const createUser = async (req, res, next) => {
       email: z.string().email(),
       role: z.string(),
       department: z.string().optional(),
+      departmentId: z.string().optional(),
       status: z.string().optional(),
     });
 
@@ -615,6 +616,7 @@ const createUser = async (req, res, next) => {
           create: {
             fullName: name,
             employeeId: 'EMP-' + Math.floor(Math.random() * 100000),
+            departmentId: req.body.departmentId || undefined,
           }
         }
       }
@@ -637,7 +639,7 @@ const createUser = async (req, res, next) => {
 
 const updateUser = async (req, res, next) => {
   try {
-    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, salaryType, hourlyRate } = req.body;
+    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, salaryType, hourlyRate, departmentId } = req.body;
     let orgId = undefined;
     if (department) {
       const org = await prisma.organization.findFirst({ where: { name: department } });
@@ -669,7 +671,8 @@ const updateUser = async (req, res, next) => {
       ...(shiftId !== undefined && { shiftId: shiftId || null }),
       ...(overtimePolicyId !== undefined && { overtimePolicyId: overtimePolicyId || null }),
       ...(salaryType && { salaryType }),
-      ...(hourlyRate !== undefined && { hourlyRate: hourlyRate ? parseFloat(hourlyRate) : null })
+      ...(hourlyRate !== undefined && { hourlyRate: hourlyRate ? parseFloat(hourlyRate) : null }),
+      ...(departmentId !== undefined && { departmentId: departmentId || null })
     };
 
     const user = await prisma.user.update({
