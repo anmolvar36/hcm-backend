@@ -73,29 +73,27 @@ const getHRReports = async (req, res, next) => {
     // 4. Calculate Stats
     // Average Time-to-Hire
     const hiredApps = allApplications.filter(a => a.status === 'HIRED');
-    let avgTimeToHire = 18; // fallback
+    let avgTimeToHire = 0;
     if (hiredApps.length > 0) {
-      // Simple logic: mock time to hire as days between submission and now / 2 to make it realistic
       const totalDays = hiredApps.reduce((acc, app) => {
-        const diffTime = Math.abs(now - new Date(app.submittedAt));
+        const diffTime = Math.abs(new Date(app.updatedAt) - new Date(app.submittedAt));
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        return acc + Math.min(diffDays, 30); // Cap at 30 days for realism
+        return acc + diffDays;
       }, 0);
-      avgTimeToHire = Math.round(totalDays / hiredApps.length) || 14;
+      avgTimeToHire = Math.round(totalDays / hiredApps.length) || 0;
     }
 
     // Application Rate
-    const totalJobsCount = allJobs.length || 1;
-    const applicationRate = Math.round((allApplications.length / totalJobsCount) * 10) || 24;
+    const applicationRate = allJobs.length > 0 ? Math.round(allApplications.length / allJobs.length) : 0;
 
     // Cost Per Hire
-    let costPerHire = 1250; // fallback
+    let costPerHire = 0;
     if (allOffers.length > 0) {
       const totalSalary = allOffers.reduce((acc, offer) => {
-        const num = parseFloat(offer.salary.replace(/[^0-9.]/g, '')) || 50000;
+        const num = parseFloat(offer.salary.replace(/[^0-9.]/g, '')) || 0;
         return acc + num;
       }, 0);
-      costPerHire = Math.round((totalSalary / allOffers.length) * 0.015) || 1250; // 1.5% of salary as cost
+      costPerHire = Math.round((totalSalary / allOffers.length) * 0.015) || 0; // estimate cost per hire as 1.5% of avg salary
     }
 
     // Recruiter Score

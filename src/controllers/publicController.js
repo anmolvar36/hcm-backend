@@ -268,12 +268,17 @@ const getPlatformStats = async (req, res, next) => {
     let totalDisbursed = payslips.reduce((sum, p) => sum + p.netPay, 0);
     let totalTaxPF = payslips.reduce((sum, p) => sum + p.tax + p.pf, 0);
 
-    const activeLives = employeeCount > 0 ? employeeCount : 412;
-    const disbursed = totalDisbursed > 0 ? (totalDisbursed / 1000).toFixed(1) : "412.5";
-    const taxes = totalTaxPF > 0 ? (totalTaxPF / 1000).toFixed(1) : "84.2";
-    const wellness = "12.4";
-    const growth = "18.2";
-    const avgAttendance = "96.8";
+    const activeLives = employeeCount;
+    const disbursed = (totalDisbursed / 1000).toFixed(1);
+    const taxes = (totalTaxPF / 1000).toFixed(1);
+    const wellness = "0.0";
+    const growth = "0.0";
+    
+    let presentCountTotal = 0;
+    attendanceLogs.forEach(log => {
+      if (log.status === 'Present') presentCountTotal++;
+    });
+    const avgAttendance = attendanceLogs.length > 0 ? ((presentCountTotal / attendanceLogs.length) * 100).toFixed(1) : "0.0";
 
     // Calculate attendance heatmap (last 28 days)
     const heatmap = [];
@@ -300,18 +305,13 @@ const getPlatformStats = async (req, res, next) => {
           heatmap.push('absent');
         }
       } else {
-        const dayOfWeek = d.getDay();
-        if (dayOfWeek === 0 || dayOfWeek === 6) {
-          heatmap.push('empty');
-        } else {
-          heatmap.push(i % 5 === 0 ? 'warning' : i % 3 === 0 ? 'absent' : 'present');
-        }
+        heatmap.push('empty');
       }
     }
 
     const recruitmentInsight = candidateCount > 0
-      ? `AI scanned ${candidateCount} candidate resumes. Identified ${topCandidate?.fullName || 'a candidate'} as premium fit (Score 96%) with Operations.`
-      : "AI scanned 48 candidate resumes. Identified dwight@hcm.ai as premium fit (Score 96%) with Operations.";
+      ? `AI scanned ${candidateCount} candidate resumes. Identified ${topCandidate?.fullName || 'a candidate'} as premium fit with Operations.`
+      : "AI scanned 0 candidate resumes. Awaiting candidates.";
 
     return res.json({
       success: true,

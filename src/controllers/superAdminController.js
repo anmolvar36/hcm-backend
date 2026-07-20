@@ -55,30 +55,55 @@ const getPlatformStats = async (req, res, next) => {
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
 
-    const [activeTimeLogsToday, employeesWithBenefits] = await Promise.all([
+    const [activeTimeLogsToday, employeesWithBenefits, totalAiRequests, organizationsWithPlans] = await Promise.all([
       prisma.attendanceLog.count({
         where: { createdAt: { gte: startOfDay } }
       }),
       prisma.employeeProfile.count({
         where: { employeeBenefits: { some: {} } }
+      }),
+      prisma.aiLog.count(),
+      prisma.organization.findMany({
+        include: { pricingPlan: true }
       })
     ]);
 
     const totalEmployeesForBenefits = totalEmployees || 1;
     const benefitsEnrollmentRate = Math.round((employeesWithBenefits / totalEmployeesForBenefits) * 100);
 
-    // Mock Revenue Metrics (to be replaced with actual billing system data)
-    const revenueMetrics = {
-      mrr: 34800,
-      arr: 417600,
-      acv: 12450,
-      activeTenants: totalOrganizations,
-      momGrowth: 15.2,
-      planDistribution: {
-        enterprise: Math.floor(totalOrganizations * 0.55) || 12,
-        pro: Math.floor(totalOrganizations * 0.30) || 48,
-        team: totalOrganizations - Math.floor(totalOrganizations * 0.55) - Math.floor(totalOrganizations * 0.30) || 120
+    let mrr = 0;
+    let arr = 0;
+    let planDistribution = { enterprise: 0, pro: 0, team: 0 };
+    
+    organizationsWithPlans.forEach(org => {
+      if (org.pricingPlan) {
+        if (org.pricingPlan.billingCycle?.toLowerCase() === 'yearly') {
+          arr += org.pricingPlan.yearlyPrice;
+          mrr += (org.pricingPlan.yearlyPrice / 12);
+        } else {
+          mrr += org.pricingPlan.monthlyPrice;
+          arr += (org.pricingPlan.monthlyPrice * 12);
+        }
+
+        const planName = org.pricingPlan.name.toLowerCase();
+        
+        if (planName.includes('enterprise') || planName.includes('custom')) {
+            planDistribution.enterprise += 1;
+        } else if (planName.includes('pro') || planName.includes('growth')) {
+            planDistribution.pro += 1;
+        } else {
+            planDistribution.team += 1;
+        }
       }
+    });
+
+    const revenueMetrics = {
+      mrr: Math.round(mrr),
+      arr: Math.round(arr),
+      acv: organizationsWithPlans.length > 0 ? Math.round(arr / organizationsWithPlans.length) : 0,
+      activeTenants: totalOrganizations,
+      momGrowth: 0, // Requires historical billing data
+      planDistribution
     };
 
     return res.status(200).json({
@@ -98,6 +123,7 @@ const getPlatformStats = async (req, res, next) => {
         totalPayrollDisbursed,
         activeTimeLogsToday,
         benefitsEnrollmentRate,
+        totalAiRequests,
         revenueMetrics
       },
     });

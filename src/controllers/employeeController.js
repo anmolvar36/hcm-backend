@@ -418,47 +418,7 @@ const getPerformance = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Seed mock reviews if none exist for demo
-    if (reviews.length === 0) {
-      await prisma.performanceReview.create({
-        data: {
-          employeeId: profile.id,
-          period: 'Q3 2026',
-          reviewer: 'Sarah Johnson',
-          rating: '4.9/5.0',
-          text: 'Exceptional ownership on the design system rollout. A true culture catalyst.'
-        }
-      });
-      await prisma.performanceReview.create({
-        data: {
-          employeeId: profile.id,
-          period: 'Q2 2026',
-          reviewer: 'Sarah Johnson',
-          rating: '4.8/5.0',
-          text: 'Quality output is industry-leading. Great focus on performance KPIs.'
-        }
-      });
-      reviews.push(
-        { period: 'Q3 2026', reviewer: 'Sarah Johnson', rating: '4.9/5.0', text: 'Exceptional ownership on the design system rollout. A true culture catalyst.' },
-        { period: 'Q2 2026', reviewer: 'Sarah Johnson', rating: '4.8/5.0', text: 'Quality output is industry-leading. Great focus on performance KPIs.' }
-      );
-    }
 
-    // Seed mock skills if none exist
-    if (skills.length === 0) {
-      await prisma.employeeSkill.createMany({
-        data: [
-          { employeeId: profile.id, name: 'React', level: 90 },
-          { employeeId: profile.id, name: 'Node.js', level: 85 },
-          { employeeId: profile.id, name: 'TypeScript', level: 80 }
-        ]
-      });
-      skills.push(
-        { name: 'React', level: 90 },
-        { name: 'Node.js', level: 85 },
-        { name: 'TypeScript', level: 80 }
-      );
-    }
 
     return res.status(200).json({ success: true, data: { goals, skills, reviews } });
   } catch (err) { next(err); }
