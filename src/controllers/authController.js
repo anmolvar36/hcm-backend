@@ -43,10 +43,17 @@ const login = async (req, res, next) => {
       where: { email },
       include: { customRole: { select: { status: true, landingPage: true, inheritsFrom: true } } }
     });
-    if (!user || !user.isActive) {
+    if (!user) {
       return res.status(401).json({
         success: false,
         error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password.' },
+      });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'ACCOUNT_SUSPENDED', message: 'Your account is suspended. Please contact support.' },
       });
     }
 
