@@ -154,6 +154,11 @@ model Organization {
   workCalendars      WorkCalendar[]
   leavePolicies      LeavePolicy[]
   attendancePolicy   AttendancePolicy?
+  billingPlanId      String?
+  billingPlan        BillingPlan? @relation(fields: [billingPlanId], references: [id])
+  subscriptionStatus String?      @default("Active")
+  invoices           Invoice[]
+
   @@map("organization")
 }
 
@@ -803,6 +808,7 @@ model BillingPlan {
   cycle       String   // "Monthly" | "Yearly"
   users       Int
   addons      String   @default("[]") // JSON array of add‑on names
+  organizations Organization[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@map("billingplan")
@@ -811,9 +817,11 @@ model BillingPlan {
 model Invoice {
   id        String   @id @default(uuid())
   date      DateTime @default(now())
-  amount    String   // formatted amount e.g. "$4,280.00"
+  totalAmount Float    @default(0)
   method    String   // e.g. "Visa •••• 4242"
   status    String   // Paid | Refunded | Unpaid
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   @@map("invoice")

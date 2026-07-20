@@ -67,18 +67,62 @@ const getPlatformStats = async (req, res, next) => {
     const totalEmployeesForBenefits = totalEmployees || 1;
     const benefitsEnrollmentRate = Math.round((employeesWithBenefits / totalEmployeesForBenefits) * 100);
 
-    // Mock Revenue Metrics (to be replaced with actual billing system data)
-    const revenueMetrics = {
-      mrr: 34800,
-      arr: 417600,
-      acv: 12450,
-      activeTenants: totalOrganizations,
-      momGrowth: 15.2,
-      planDistribution: {
-        enterprise: Math.floor(totalOrganizations * 0.55) || 12,
-        pro: Math.floor(totalOrganizations * 0.30) || 48,
-        team: totalOrganizations - Math.floor(totalOrganizations * 0.55) - Math.floor(totalOrganizations * 0.30) || 120
+    // Live Revenue Metrics
+    const orgs = await prisma.organization.findMany({
+      where: { subscriptionStatus: 'Active', billingPlanId: { not: null } },
+      include: { billingPlan: true }
+    });
+
+    let mrr = 0;
+    const planDistribution = { enterprise: 0, pro: 0, team: 0 };
+    
+    orgs.forEach(org => {
+      if (org.billingPlan) {
+        mrr += org.billingPlan.price;
+        const planName = org.billingPlan.name.toLowerCase();
+        if (planDistribution[planName] !== undefined) {
+          planDistribution[planName]++;
+        } else {
+          planDistribution.team++; // default fallback
+        }
       }
+    });
+
+    const arr = mrr * 12;
+    const acv = orgs.length > 0 ? arr / orgs.length : 0;
+
+    // Calculate MoM Growth from Invoices
+    const now = new Date();
+    const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    const invoicesThisMonth = await prisma.invoice.aggregate({
+      _sum: { totalAmount: true },
+      where: { date: { gte: firstDayThisMonth }, status: 'Paid' }
+    });
+    const invoicesLastMonth = await prisma.invoice.aggregate({
+      _sum: { totalAmount: true },
+      where: { date: { gte: firstDayLastMonth, lt: firstDayThisMonth }, status: 'Paid' }
+    });
+
+    const currentRevenue = invoicesThisMonth._sum.totalAmount || 0;
+    const lastRevenue = invoicesLastMonth._sum.totalAmount || 0;
+    
+    let momGrowth = 0;
+    if (lastRevenue > 0) {
+      momGrowth = ((currentRevenue - lastRevenue) / lastRevenue) * 100;
+    } else if (currentRevenue > 0) {
+      momGrowth = 100; // 100% growth if no last month revenue
+    }
+
+    const revenueMetrics = {
+      mrr,
+      arr,
+      acv,
+      activeTenants: orgs.length,
+      momGrowth: parseFloat(momGrowth.toFixed(1)),
+      planDistribution,
+      newOrgsThisMonth: orgs.filter(o => o.createdAt >= firstDayThisMonth).length
     };
 
     return res.status(200).json({
