@@ -15,18 +15,16 @@ const {
   removeAssignment
 } = require('../controllers/calendarController');
 
-router.use(protect, authorize('ADMIN', 'SUPERADMIN'));
-
 router.route('/')
-  .get(getAllCalendars)
-  .post(createCalendar);
+  .get(protect, getAllCalendars)
+  .post(protect, authorize('ADMIN', 'SUPERADMIN', 'HR'), createCalendar);
 
 router.route('/:id')
-  .get(getCalendarById)
-  .put(updateCalendar)
-  .delete(deleteCalendar);
+  .get(protect, getCalendarById)
+  .put(protect, authorize('ADMIN', 'SUPERADMIN', 'HR'), updateCalendar)
+  .delete(protect, authorize('ADMIN', 'SUPERADMIN', 'HR'), deleteCalendar);
 
-router.post('/assign', assignCalendar);
-router.delete('/assignments/:id', removeAssignment);
+router.post('/assign', protect, authorize('ADMIN', 'SUPERADMIN', 'HR'), assignCalendar);
+router.delete('/assignments/:id', protect, authorize('ADMIN', 'SUPERADMIN', 'HR'), removeAssignment);
 
 module.exports = router;

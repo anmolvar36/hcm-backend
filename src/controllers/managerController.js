@@ -45,18 +45,32 @@ const getTeamLeaves = async (req, res, next) => {
     const orgId = req.user.organizationId || (await prisma.organization.findFirst({ select: { id: true } }))?.id;
 
     let whereClause = {};
+    let assignedLeaveIds = [];
 
     if (!['ADMIN', 'SUPERADMIN', 'HR'].includes(req.user.role)) {
       const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
       if (!managerProfile) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Manager profile not found.' } });
 
+      // 1. Direct reports
       const teamMembers = await prisma.employeeProfile.findMany({
         where: { managerId: managerProfile.id },
         select: { userId: true },
       });
-
       const userIds = teamMembers.map(m => m.userId);
-      whereClause = { userId: { in: userIds } };
+
+      // 2. Explicitly assigned via Approval Workflow Engine
+      const pendingApprovals = await prisma.approvalLog.findMany({
+        where: { approverId: managerProfile.id, status: 'Pending', entityType: 'LeaveRequest' },
+        select: { entityId: true }
+      });
+      assignedLeaveIds = pendingApprovals.map(a => a.entityId);
+
+      whereClause = { 
+        OR: [
+          { userId: { in: userIds } },
+          { id: { in: assignedLeaveIds } }
+        ]
+      };
     } else {
       if (orgId) {
         whereClause = { user: { organizationId: orgId } };
@@ -73,7 +87,12 @@ const getTeamLeaves = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.status(200).json({ success: true, data: leaves });
+    const leavesWithAccess = leaves.map(leave => ({
+      ...leave,
+      canApprove: ['ADMIN', 'SUPERADMIN', 'HR'].includes(req.user.role) ? true : assignedLeaveIds.includes(leave.id)
+    }));
+
+    return res.status(200).json({ success: true, data: leavesWithAccess });
   } catch (err) { next(err); }
 };
 
@@ -125,7 +144,7 @@ const reviewLeave = async (req, res, next) => {
           } else if (nextRole === 'ADMIN') {
             newLeaveStatus = 'HR_APPROVED';
           } else {
-            newLeaveStatus = 'Pending';
+            newLeaveStatus = 'PENDING';
           }
         }
         const updatedLeave = await prisma.leaveRequest.update({

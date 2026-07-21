@@ -491,7 +491,7 @@ const getAnalytics = async (req, res, next) => {
       prisma.supportTicket.count({ where: { createdAt: { gte: startDate } } }),
       prisma.payslip.count({ where: { createdAt: { gte: startDate } } }),
       prisma.attendanceLog.count({ where: { createdAt: { gte: startDate } } }),
-      prisma.aiLog.count({ where: { createdAt: { gte: startDate } } }),
+      prisma.aiLog.count({ where: { timestamp: { gte: startDate } } }),
       prisma.employeeBenefit.count({ where: { createdAt: { gte: startDate } } }),
       prisma.auditLog.count({ where: { createdAt: { gte: startDate } } }),
       prisma.auditLog.findMany({

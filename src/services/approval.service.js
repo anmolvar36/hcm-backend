@@ -2,6 +2,21 @@ const prisma = require('../config/prisma');
 const { resolveApprover } = require('../utils/approval.utils');
 
 /**
+ * Gets the original requester's userId for a given entity.
+ */
+const getOriginalRequesterId = async (module, entityId) => {
+  if (module === 'LeaveRequest') {
+    const record = await prisma.leaveRequest.findUnique({ where: { id: entityId }, select: { userId: true } });
+    if (record) return record.userId;
+  } else if (module === 'SalaryIncrementRequest') {
+    const record = await prisma.salaryIncrementRequest.findUnique({ where: { id: entityId }, select: { employee: { select: { userId: true } } } });
+    if (record && record.employee) return record.employee.userId;
+  }
+  // Fallback for Phase 1 if the module isn't strictly defined
+  throw new Error(`Could not determine original requester for module ${module}`);
+};
+
+/**
  * Checks if a custom workflow is active for a given module and organization.
  */
 const isWorkflowEnabled = async (module, organizationId) => {
@@ -85,15 +100,14 @@ const processApproval = async (module, entityId, approverUserId, action, comment
   const isSuperAdmin = user?.role === 'SUPERADMIN';
   const isAdmin = user?.role === 'ADMIN';
   const isHR = user?.role === 'HR';
-  const isRoleMatch = stepConfig?.approverType === 'ROLE' && stepConfig?.approverRole?.toUpperCase() === user?.role?.toUpperCase();
   
   const stepRequiredRole = stepConfig?.approverRole?.toUpperCase() || '';
   // HR can override steps as long as they don't require Admin or Superadmin
   const isHROverride = isHR && !['ADMIN', 'SUPERADMIN'].includes(stepRequiredRole);
 
-  if (!isExactApprover && !isSuperAdmin && !isAdmin && !isRoleMatch && !isHROverride) {
+  if (!isExactApprover && !isSuperAdmin && !isAdmin && !isHROverride) {
     const requiredRole = stepConfig?.approverRole || 'Designated Approver';
-    throw new Error(`Unauthorized approver. This step requires: ${requiredRole}`);
+    throw new Error(`Unauthorized approver. This step requires the explicitly assigned approver (or an override via HR/Admin/Superadmin).`);
   }
 
   const newStatus = action === 'APPROVE' ? 'Approved' : 'Rejected';
@@ -126,9 +140,9 @@ const processApproval = async (module, entityId, approverUserId, action, comment
   const nextStepConfig = sortedSteps.find(s => s.sequence > currentLog.stepOrder);
 
   if (nextStepConfig) {
-    // We need the original requester userId to resolve context
-    // For Phase 1 we pass approverUserId as a fallback
-    const nextApproverId = await resolveApprover(nextStepConfig, approverUserId, workflow.organizationId);
+    // We need the original requester userId to resolve context correctly through the hierarchy
+    const originalRequesterId = await getOriginalRequesterId(module, entityId);
+    const nextApproverId = await resolveApprover(nextStepConfig, originalRequesterId, workflow.organizationId);
 
     const nextNextStepConfig = sortedSteps.find(s => s.sequence > nextStepConfig.sequence);
     const nextNextStepSeq = nextNextStepConfig ? nextNextStepConfig.sequence : null;

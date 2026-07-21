@@ -13,7 +13,7 @@ exports.getCompensationProfile = async (req, res) => {
       where: { employeeId },
       include: { salaryBand: true, salaryStructure: true, employee: true }
     });
-    if (!profile) return res.status(404).json({ message: "No compensation profile found." });
+    if (!profile) return res.json(null);
     res.json(profile);
   } catch (error) {
     res.status(500).json({ message: error.message });
