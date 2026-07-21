@@ -117,7 +117,7 @@ const applyToJob = async (req, res, next) => {
 const getMyApplications = async (req, res, next) => {
   try {
     const profile = await prisma.candidateProfile.findUnique({ where: { userId: req.user.userId } });
-    if (!profile) return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Candidate profile not found.' } });
+    if (!profile) return res.status(200).json({ success: true, data: [] });
 
     const applications = await prisma.jobApplication.findMany({
       where: { candidateId: profile.id },
@@ -338,7 +338,6 @@ const withdrawApplication = async (req, res, next) => {
     await prisma.jobApplication.delete({
       where: { id: req.params.appId },
     });
-
     return res.status(200).json({ success: true, message: 'Application withdrawn successfully.' });
   } catch (err) { next(err); }
 };
@@ -348,7 +347,7 @@ const getMyOffers = async (req, res, next) => {
     const profile = await prisma.candidateProfile.findUnique({
       where: { userId: req.user.userId }
     });
-    if (!profile) return res.status(404).json({ success: false, error: { message: 'Candidate profile not found.' } });
+    if (!profile) return res.status(200).json({ success: true, data: [] });
 
     const offers = await prisma.offer.findMany({
       where: {

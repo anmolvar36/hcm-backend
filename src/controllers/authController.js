@@ -326,10 +326,26 @@ const getMyPermissions = async (req, res, next) => {
 
     const permissions = customRole ? JSON.parse(customRole.permissions || '{}') : {};
 
+    // Also fetch the base EMPLOYEE permissions so that dual-role users (like MANAGER) 
+    // can have their Employee Console filtered correctly according to the Employee role setup.
+    let employeePermissions = {};
+    if (userRole !== 'EMPLOYEE') {
+      const employeeBaseRoleName = getRoleCustomName('EMPLOYEE');
+      if (employeeBaseRoleName) {
+        const employeeRole = await prisma.customRole.findFirst({ where: { name: employeeBaseRoleName, status: 'ACTIVE' } });
+        if (employeeRole) {
+          employeePermissions = JSON.parse(employeeRole.permissions || '{}');
+        }
+      }
+    } else {
+      employeePermissions = permissions;
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         permissions,
+        employeePermissions,
         role: isOverride ? customRole.inheritsFrom : userRole,
         roleName: customRole ? customRole.name : userRole,
         isSuperAdmin: false,
