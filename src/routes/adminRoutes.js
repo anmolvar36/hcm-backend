@@ -9,7 +9,7 @@ const {
   getDashboardStats,
   getOrganization, createOrganization, updateOrganization,
   getDepartments, createDepartment, updateDepartment, deleteDepartment,
-  getAllUsers, createUser, changeUserRole, toggleUserActive, deleteUser,
+  getAllUsers, createUser, updateUser, changeUserRole, toggleUserActive, deleteUser,
   getAllPayslips, generatePayslip, markPayslipPaid,
   getAuditLogs,
   getPolicies, createPolicy, updatePolicy, deletePolicy, toggleArchivePolicy, renewPolicy, sendPolicyReminder,
@@ -61,6 +61,7 @@ router.delete('/departments/:id', deleteDepartment);
 // Users
 router.get('/users', getAllUsers);
 router.post('/users', createUser);
+router.put('/users/:id', updateUser);
 router.patch('/users/:id/role', changeUserRole);
 router.patch('/users/:id/toggle-active', toggleUserActive);
 router.delete('/users/:id', deleteUser);

@@ -541,6 +541,86 @@ const toggleUserActive = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// PUT /api/admin/users/:id
+const updateUser = async (req, res, next) => {
+  try {
+    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, 
+      salaryType, hourlyRate, departmentId, password, customRoleId } = req.body;
+      
+    const existingUser = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { employeeProfile: true }
+    });
+    if (!existingUser) return res.status(404).json({ success: false, error: { message: 'User not found' } });
+    if (existingUser.role === 'SUPERADMIN') {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Forbidden' } });
+    }
+
+    let finalDeptId = departmentId;
+    if (department) {
+      const dept = await prisma.department.findFirst({
+        where: { OR: [{ id: department }, { name: department }] }
+      });
+      if (dept) finalDeptId = dept.id;
+    }
+
+    let managerId = undefined;
+    if (manager && manager !== 'None') {
+      const managerUser = await prisma.employeeProfile.findFirst({
+        where: { OR: [{ fullName: manager }, { employeeId: manager }, { id: manager }] }
+      });
+      if (managerUser) managerId = managerUser.id;
+    }
+
+    const empData = {
+      ...(name !== undefined && { fullName: name }),
+      ...(empType !== undefined && { employmentType: empType }),
+      ...(phone !== undefined && { phone }),
+      ...(address !== undefined && { address }),
+      ...(managerId !== undefined && { managerId }),
+      ...(shiftId !== undefined && { shiftId: shiftId || null }),
+      ...(overtimePolicyId !== undefined && { overtimePolicyId: overtimePolicyId || null }),
+      ...(salaryType !== undefined && { salaryType }),
+      ...(hourlyRate !== undefined && { hourlyRate: hourlyRate ? parseFloat(hourlyRate) : null }),
+      ...(finalDeptId !== undefined && { departmentId: finalDeptId || null })
+    };
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data: {
+        ...(email !== undefined && { email }),
+        ...(role !== undefined && { role: roleToEnum(role) }),
+        ...(status !== undefined && { status, isActive: status.toLowerCase() === 'active' }),
+        ...(customRoleId !== undefined && { customRoleId: customRoleId || null }),
+        ...(password && { passwordHash: await bcrypt.hash(password, 10) }),
+        employeeProfile: existingUser.employeeProfile ? {
+          update: empData
+        } : {
+          create: {
+            fullName: name || (email || existingUser.email).split('@')[0],
+            employeeId: 'EMP-' + Math.floor(Math.random() * 100000),
+            ...empData
+          }
+        }
+      },
+      include: { employeeProfile: true }
+    });
+
+    if (req.user) {
+      await prisma.auditLog.create({
+        data: {
+          userId: req.user.userId,
+          action: 'UPDATE_USER',
+          details: `Updated user profile for ${user.email}`,
+          ipAddress: req.ip || req.socket.remoteAddress
+        }
+      });
+    }
+
+    return res.status(200).json({ success: true, data: user });
+  } catch (err) { next(err); }
+};
+
 const deleteUser = async (req, res, next) => {
   try {
     const existing = await prisma.user.findUnique({ where: { id: req.params.id } });
@@ -1600,7 +1680,7 @@ module.exports = {
   getDashboardStats,
   getOrganization, createOrganization, updateOrganization,
   getDepartments, createDepartment, updateDepartment, deleteDepartment,
-  getAllUsers, createUser, changeUserRole, toggleUserActive, deleteUser,
+  getAllUsers, createUser, updateUser, changeUserRole, toggleUserActive, deleteUser,
   getAllPayslips, generatePayslip, markPayslipPaid,
   getAuditLogs,
   getPolicies, createPolicy, updatePolicy, deletePolicy,
