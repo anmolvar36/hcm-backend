@@ -886,7 +886,10 @@ const getPayrollHistory = async (req, res, next) => {
         unpaidLeaveDays: p.unpaidLeaveDays || 0,
         overtimeHours: p.overtimeHours || 0,
         overtimeAmount: p.overtimeAmount || 0,
-        lopDeductionAmount: p.items.find(i => i.code === 'LOP_DEDUCT')?.amount || 0
+        lopDeductionAmount: p.items.find(i => i.code === 'LOP_DEDUCT')?.amount || 0,
+        items: p.items,
+        currency: 'USD',
+        grossSalary: p.grossSalary
       };
     });
 
