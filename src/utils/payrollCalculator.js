@@ -166,10 +166,21 @@ class PayrollCalculator {
       }
 
       const policy = leavePolicies.find(p => p.name === leave.leaveType);
-      if (policy && policy.isPaid) {
-        paidLeaveDays += actualLeaveDaysInMonth;
+      const defaultPaidLeaves = ['Annual Leave', 'Sick Leave', 'Casual Leave', 'Paid Leave', 'Maternity Leave', 'Paternity Leave'];
+      
+      if (policy) {
+        if (policy.isPaid) {
+          paidLeaveDays += actualLeaveDaysInMonth;
+        } else {
+          unpaidLeaveDays += actualLeaveDaysInMonth;
+        }
       } else {
-        unpaidLeaveDays += actualLeaveDaysInMonth;
+        // Fallback: if no policy configured, assume standard leaves are paid
+        if (defaultPaidLeaves.includes(leave.leaveType)) {
+          paidLeaveDays += actualLeaveDaysInMonth;
+        } else {
+          unpaidLeaveDays += actualLeaveDaysInMonth;
+        }
       }
     });
 

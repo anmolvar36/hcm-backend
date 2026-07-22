@@ -151,10 +151,17 @@ const getMyApplications = async (req, res, next) => {
 // GET /api/candidate/profile
 const getCandidateProfile = async (req, res, next) => {
   try {
-    const profile = await prisma.candidateProfile.findUnique({
+    let profile = await prisma.candidateProfile.findUnique({
       where: { userId: req.user.userId },
       include: { user: { select: { email: true } } },
     });
+    
+    if (!profile) {
+      profile = await prisma.candidateProfile.create({
+        data: { userId: req.user.userId },
+        include: { user: { select: { email: true } } },
+      });
+    }
 
     return res.status(200).json({ success: true, data: profile });
   } catch (err) { next(err); }
@@ -171,8 +178,12 @@ const updateCandidateProfile = async (req, res, next) => {
       avatarBase64, resumeBase64, identityProofBase64, educationProofBase64
     } = req.body;
 
-    const profile = await prisma.candidateProfile.findUnique({ where: { userId: req.user.userId } });
-    if (!profile) return res.status(404).json({ success: false, error: { message: 'Profile not found' } });
+    let profile = await prisma.candidateProfile.findUnique({ where: { userId: req.user.userId } });
+    if (!profile) {
+      profile = await prisma.candidateProfile.create({
+        data: { userId: req.user.userId }
+      });
+    }
 
     const handleBase64Upload = (base64Str, fallbackUrl, filenamePrefix) => {
       if (base64Str) {
