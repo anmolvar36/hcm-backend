@@ -565,11 +565,15 @@ const updateUser = async (req, res, next) => {
     }
 
     let managerId = undefined;
-    if (manager && manager !== 'None') {
-      const managerUser = await prisma.employeeProfile.findFirst({
-        where: { OR: [{ fullName: manager }, { employeeId: manager }, { id: manager }] }
-      });
-      if (managerUser) managerId = managerUser.id;
+    if (manager) {
+      if (manager === 'None') {
+        managerId = null;
+      } else {
+        const managerUser = await prisma.employeeProfile.findFirst({
+          where: { OR: [{ fullName: manager }, { employeeId: manager }, { id: manager }] }
+        });
+        if (managerUser) managerId = managerUser.id;
+      }
     }
 
     const empData = {
