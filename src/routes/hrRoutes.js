@@ -4,6 +4,8 @@
 const express = require('express');
 const router = express.Router();
 const { protect, authorize } = require('../middlewares/authMiddleware');
+const upload = require('../middlewares/upload');
+const fileUpload = require('../middlewares/fileUpload');
 
 const {
   getJobs, createJob, updateJob, deleteJob,
@@ -11,7 +13,7 @@ const {
   getInterviews, scheduleInterview, updateInterview, deleteInterviewById, updateInterviewStatus, submitInterviewFeedback,
   getAllEmployees, onboardEmployee, deactivateEmployee,
   getAllLeaves,
-  getAllTickets, replyTicket, updateTicketStatus,
+  getAllTickets, createTicket, replyTicket, updateTicketStatus,
   getOffers, createOffer, updateOffer, deleteOffer,
   getOnboardingTasks, createOnboardingTask, updateOnboardingTask, deleteOnboardingTask,
   remindManager, sendWelcomeEmailAll,
@@ -90,7 +92,8 @@ router.get('/leaves', getAllLeaves);
 
 // Support Tickets
 router.get('/tickets', getAllTickets);
-router.post('/tickets/:id/reply', replyTicket);
+router.post('/tickets', createTicket);
+router.post('/tickets/:id/reply', fileUpload.single('file'), replyTicket);
 router.patch('/tickets/:id/status', updateTicketStatus);
 
 // Onboarding

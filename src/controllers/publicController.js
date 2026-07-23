@@ -30,12 +30,14 @@ const contactFormSchema = z.object({
 });
 
 const careerApplicationSchema = z.object({
+  jobId: z.string().optional(),
   jobTitle: z.string(),
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
   email: z.string().email({ message: 'Valid email is required.' }),
-  phone: z.string(),
+  phone: z.string().optional(),
   resumeName: z.string().optional(),
-  portfolioUrl: z.string().url({ message: 'Valid URL is required.' }).optional(),
+  resumeData: z.string().optional(),
+  portfolioUrl: z.string().optional(),
   explanation: z.string().min(10, { message: 'Explanation must be at least 10 characters.' }),
   aiScore: z.number().optional()
 });
@@ -154,11 +156,11 @@ const submitCareerApplication = async (req, res, next) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: { code: 'VALIDATION_ERROR', message: parsed.error.errors[0].message },
+        error: { code: 'VALIDATION_ERROR', message: parsed.error?.issues?.[0]?.message || parsed.error?.errors?.[0]?.message || 'Validation error' },
       });
     }
 
-    const { jobTitle, name, email, phone, resumeName, portfolioUrl, explanation, aiScore } = parsed.data;
+    const { jobId, jobTitle, name, email, phone, resumeName, resumeData, portfolioUrl, explanation, aiScore } = parsed.data;
 
     // Create a candidate user if not exists
     let user;
@@ -174,44 +176,73 @@ const submitCareerApplication = async (req, res, next) => {
           role: 'CANDIDATE'
         }
       });
+    }
 
-      // Create candidate profile
-      await prisma.candidateProfile.create({
+    // Get or Create candidate profile
+    let candidateProfile = await prisma.candidateProfile.findUnique({ where: { userId: user.id } });
+    if (!candidateProfile) {
+      candidateProfile = await prisma.candidateProfile.create({
         data: {
           userId: user.id,
           fullName: name,
           phone,
           linkedin: portfolioUrl,
           resumeUrl: resumeName,
+          resumeData: resumeData,
           skills: explanation
         }
       });
+    } else if (resumeData) {
+      candidateProfile = await prisma.candidateProfile.update({
+        where: { id: candidateProfile.id },
+        data: { resumeData: resumeData, resumeUrl: resumeName }
+      });
     }
 
-    // Store application using JobApplication model (would need a job post reference)
-    // For now, we'll create a support ticket to track the application
-    const applicationTicket = await prisma.supportTicket.create({
-      data: {
-        userId: user.id,
-        subject: `Career Application: ${jobTitle} - ${name}`,
-        category: 'Career',
-        priority: 'High',
-        status: 'OPEN'
+    let targetJobId = jobId;
+    if (!targetJobId) {
+      // Fallback if frontend didn't pass jobId: find by jobTitle
+      const matchingJob = await prisma.jobPost.findFirst({
+        where: { title: jobTitle }
+      });
+      targetJobId = matchingJob ? matchingJob.id : null;
+    }
+
+    if (!targetJobId) {
+       return res.status(404).json({
+         success: false,
+         error: { code: 'NOT_FOUND', message: 'Job post not found' },
+       });
+    }
+
+    // Check if application already exists
+    const existingApplication = await prisma.jobApplication.findFirst({
+      where: {
+        jobId: targetJobId,
+        candidateId: candidateProfile.id
       }
     });
 
-    await prisma.ticketMessage.create({
+    if (existingApplication) {
+      return res.status(400).json({
+         success: false,
+         error: { code: 'ALREADY_APPLIED', message: 'You have already applied for this position' },
+      });
+    }
+
+    const application = await prisma.jobApplication.create({
       data: {
-        ticketId: applicationTicket.id,
-        senderId: user.id,
-        text: `Position: ${jobTitle}\nEmail: ${email}\nPhone: ${phone}\nPortfolio: ${portfolioUrl}\nResume: ${resumeName}\n\nWhy join:\n${explanation}\n\nAI Match Score: ${aiScore || 'N/A'}%`
+        jobId: targetJobId,
+        candidateId: candidateProfile.id,
+        resumeUrl: resumeName,
+        coverLetter: `Phone: ${phone}\nPortfolio: ${portfolioUrl}\n\nWhy join:\n${explanation}\n\nAI Match Score: ${aiScore || 'N/A'}%`
       }
     });
 
     return res.status(201).json({
       success: true,
       data: {
-        id: applicationTicket.id,
+        id: application.id,
         jobTitle,
         name,
         email,
@@ -228,15 +259,29 @@ const submitCareerApplication = async (req, res, next) => {
 // GET /api/public/jobs - Get available career opportunities
 const getAvailableJobs = async (req, res, next) => {
   try {
-    // Return static job listings (in production, this would query from database)
-    const jobs = [
-      { id: 1, title: 'Senior AI Engineer (NLP/LLMs)', dept: 'Engineering', loc: 'Remote (US/EU)', type: 'Full-time' },
-      { id: 2, title: 'Senior Frontend Engineer (React)', dept: 'Engineering', loc: 'Hybrid (SF/NYC)', type: 'Full-time' },
-      { id: 3, title: 'Enterprise Customer Success Lead', dept: 'Operations', loc: 'On-site (London)', type: 'Full-time' },
-      { id: 4, title: 'Growth Marketing Manager', dept: 'Marketing', loc: 'Remote', type: 'Full-time' }
-    ];
+    const jobs = await prisma.jobPost.findMany({
+      where: {
+        status: 'Published',
+        isActive: true
+      },
+      select: {
+        id: true,
+        title: true,
+        department: true,
+        location: true,
+        jobType: true
+      }
+    });
 
-    return res.status(200).json({ success: true, data: jobs });
+    const formattedJobs = jobs.map(job => ({
+      id: job.id,
+      title: job.title,
+      dept: job.department || 'General',
+      loc: job.location || 'Remote',
+      type: job.jobType || 'Full-time'
+    }));
+
+    return res.status(200).json({ success: true, data: formattedJobs });
   } catch (err) {
     next(err);
   }

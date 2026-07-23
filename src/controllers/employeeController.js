@@ -48,6 +48,29 @@ const getOrCreateProfile = async (userId) => {
     }
   }
 
+  // Fetch WorkCalendarAssignment for weekends
+  let assignment = await prisma.workCalendarAssignment.findFirst({
+    where: { entityType: 'EMPLOYEE', entityId: profile.id },
+    include: {
+      calendar: { include: { versions: { include: { weekends: true } } } }
+    }
+  });
+
+  let calendar = assignment?.calendar;
+  if (!calendar) {
+    calendar = await prisma.workCalendar.findFirst({
+      where: { isDefaultCompanyCalendar: true },
+      include: { versions: { include: { weekends: true } } }
+    });
+  }
+
+  if (calendar && calendar.versions && calendar.versions.length > 0) {
+    profile.weekends = calendar.versions[0].weekends.map(w => ({ dayOfWeek: w.dayOfWeek, type: w.type }));
+  } else {
+    profile.weekends = [{ dayOfWeek: 0, type: 'FullDay' }, { dayOfWeek: 6, type: 'FullDay' }];
+  }
+
+
   return profile;
 };
 
@@ -474,13 +497,26 @@ const createTicket = async (req, res, next) => {
     if (parsed.data.attachmentBase64) {
       const fs = require('fs');
       const path = require('path');
+      const match = parsed.data.attachmentBase64.match(/^data:(.*?);base64,/);
+      let ext = '.png';
+      if (match && match[1]) {
+        const mimeTypes = {
+          'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+          'application/pdf': '.pdf', 'application/msword': '.doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.ms-excel': '.xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+          'text/csv': '.csv', 'text/plain': '.txt'
+        };
+        ext = mimeTypes[match[1]] || '.bin';
+      }
       const base64Data = parsed.data.attachmentBase64.replace(/^data:.*;base64,/, "");
       const fileBuffer = Buffer.from(base64Data, 'base64');
-      const filename = `${Date.now()}_attachment.png`;
+      const filename = `${Date.now()}_attachment${ext}`;
       const uploadPath = path.join(__dirname, '../../public/uploads', filename);
       fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
       fs.writeFileSync(uploadPath, fileBuffer);
-      attachmentUrl = `http://localhost:5000/uploads/${filename}`;
+      attachmentUrl = `/uploads/${filename}`;
     }
 
     const ticket = await prisma.supportTicket.create({
@@ -517,13 +553,26 @@ const replyTicket = async (req, res, next) => {
     if (attachmentBase64) {
       const fs = require('fs');
       const path = require('path');
+      const match = attachmentBase64.match(/^data:(.*?);base64,/);
+      let ext = '.png';
+      if (match && match[1]) {
+        const mimeTypes = {
+          'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+          'application/pdf': '.pdf', 'application/msword': '.doc',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+          'application/vnd.ms-excel': '.xls',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+          'text/csv': '.csv', 'text/plain': '.txt'
+        };
+        ext = mimeTypes[match[1]] || '.bin';
+      }
       const base64Data = attachmentBase64.replace(/^data:.*;base64,/, "");
       const fileBuffer = Buffer.from(base64Data, 'base64');
-      const filename = `${Date.now()}_attachment.png`;
+      const filename = `${Date.now()}_attachment${ext}`;
       const uploadPath = path.join(__dirname, '../../public/uploads', filename);
       fs.mkdirSync(path.dirname(uploadPath), { recursive: true });
       fs.writeFileSync(uploadPath, fileBuffer);
-      attachmentUrl = `http://localhost:5000/uploads/${filename}`;
+      attachmentUrl = `/uploads/${filename}`;
     }
 
     const msg = await prisma.ticketMessage.create({
@@ -1000,7 +1049,7 @@ const getResignation = async (req, res, next) => {
     });
 
     if (!resignation) {
-      return res.status(404).json({ success: false, message: 'No resignation found.' });
+      return res.status(200).json({ success: true, data: null, message: 'No resignation found.' });
     }
 
     return res.status(200).json({ success: true, data: resignation });

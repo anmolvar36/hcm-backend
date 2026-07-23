@@ -910,7 +910,10 @@ const getAllTickets = async (req, res, next) => {
     const tickets = await prisma.supportTicket.findMany({
       include: {
         user: { select: { email: true, employeeProfile: { select: { fullName: true } } } },
-        messages: { include: { sender: { select: { email: true, role: true } } } },
+        messages: { 
+          include: { sender: { select: { email: true, role: true } } },
+          orderBy: { createdAt: 'asc' }
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -919,14 +922,42 @@ const getAllTickets = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
+// POST /api/hr/tickets
+const createTicket = async (req, res, next) => {
+  try {
+    const { to, subject, message } = req.body;
+    if (!to || !subject || !message) {
+      return res.status(400).json({ success: false, error: { message: 'Recipient, Subject and Message are required.' } });
+    }
+
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        userId: to,
+        subject,
+        category: 'General',
+        priority: 'Medium',
+        messages: {
+          create: {
+            senderId: req.user.userId,
+            text: message,
+          }
+        }
+      }
+    });
+
+    return res.status(201).json({ success: true, data: ticket });
+  } catch (err) { next(err); }
+};
+
 // POST /api/hr/tickets/:id/reply
 const replyTicket = async (req, res, next) => {
   try {
     const { text } = req.body;
-    if (!text) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Reply text is required.' } });
+    const attachmentUrl = req.file ? `/uploads/${req.file.filename}` : null;
+    if (!text && !attachmentUrl) return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Reply text or attachment is required.' } });
 
     const msg = await prisma.ticketMessage.create({
-      data: { ticketId: req.params.id, senderId: req.user.userId, text },
+      data: { ticketId: req.params.id, senderId: req.user.userId, text: text || '', attachmentUrl },
     });
 
     return res.status(201).json({ success: true, data: msg });
@@ -1175,7 +1206,7 @@ module.exports = {
   getInterviews, scheduleInterview, updateInterview, deleteInterviewById, updateInterviewStatus, submitInterviewFeedback,
   getAllEmployees, onboardEmployee, deactivateEmployee,
   getAllLeaves,
-  getAllTickets, replyTicket, updateTicketStatus,
+  getAllTickets, createTicket, replyTicket, updateTicketStatus,
   getOffers, createOffer, updateOffer, deleteOffer,
   getOnboardingTasks, createOnboardingTask, updateOnboardingTask, deleteOnboardingTask,
   remindManager, sendWelcomeEmailAll,
