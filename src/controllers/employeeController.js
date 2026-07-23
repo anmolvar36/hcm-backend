@@ -299,6 +299,15 @@ const applyLeave = async (req, res, next) => {
     const startDateObj = new Date(parsed.data.startDate);
     const endDateObj = new Date(parsed.data.endDate);
 
+    const empProfile = await prisma.employeeProfile.findUnique({
+      where: { userId: req.user.userId },
+      include: { manager: true }
+    });
+
+    if (!empProfile) {
+      return res.status(404).json({ success: false, error: { message: 'Employee profile not found.' } });
+    }
+
     // --- INTEGRATE ENTERPRISE CALENDAR FOR LEAVE CALCULATION ---
     let calculatedDays = 0;
     try {
@@ -307,7 +316,7 @@ const applyLeave = async (req, res, next) => {
       
       for (let i = 0; i < daysCount; i++) {
         const currentDate = new Date(startDateObj.getTime() + (i * msPerDay));
-        const dayType = await calendarResolver.getDayType(req.user.userId, currentDate);
+        const dayType = await calendarResolver.getDayType(empProfile.id, currentDate);
         
         // This simulates a policy where FULL weekends and holidays don't consume leave balance.
         // In a full implementation, we would query the specific LeavePolicy here.
@@ -349,16 +358,13 @@ const applyLeave = async (req, res, next) => {
         return res.status(201).json({ success: true, data: leave, message: 'Leave request submitted and workflow started.' });
       }
     } catch (engineErr) {
-      console.error('[Leave Workflow Fallback] Error starting generic workflow, falling back to legacy:', engineErr);
+      console.warn(`[Leave Workflow Fallback] Error starting generic workflow, falling back to legacy: ${engineErr.message}`);
     }
     // -------------------------------------------
 
     try {
       const { createNotification } = require('../utils/notificationHelper');
-      const empProfile = await prisma.employeeProfile.findUnique({
-        where: { userId: req.user.userId },
-        include: { manager: true }
-      });
+      
       if (empProfile && empProfile.manager?.userId) {
         await createNotification({
           userId: empProfile.manager.userId,
