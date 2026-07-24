@@ -1,6 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const { initiateApproval } = require('../services/approvalWorkflowService');
+const { isWorkflowEnabled, startWorkflow, processApproval } = require('../services/approval.service');
 const { generatePayrollSnapshot } = require('../services/payrollEngineService');
 
 // ==========================================
@@ -101,11 +101,14 @@ exports.requestIncrement = async (req, res) => {
 
     // Try to initiate workflow
     try {
-      const { workflow } = await initiateApproval(req.user.organizationId, 'SalaryIncrement', request.id, employeeId);
-      await prisma.salaryIncrementRequest.update({
-        where: { id: request.id },
-        data: { workflowId: workflow.id }
-      });
+      const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', req.user.organizationId);
+      if (workflowActive) {
+        const log = await startWorkflow('SalaryIncrementRequest', request.id, req.user.organizationId, req.user.userId);
+        await prisma.salaryIncrementRequest.update({
+          where: { id: request.id },
+          data: { workflowId: log.workflowId }
+        });
+      }
     } catch (wfError) {
       console.warn("Workflow not initiated:", wfError.message);
     }
@@ -233,14 +236,23 @@ exports.finalizePayrollSnapshot = async (req, res) => {
 
 exports.getHRIncrementRequests = async (req, res) => {
   try {
+    const hrProfile = await prisma.employeeProfile.findUnique({
+      where: { userId: req.user.userId }
+    });
+
+    let assignedIds = [];
+    if (hrProfile) {
+      const pendingLogs = await prisma.approvalLog.findMany({
+        where: { approverId: hrProfile.id, status: 'Pending', entityType: 'SalaryIncrementRequest' },
+        select: { entityId: true }
+      });
+      assignedIds = pendingLogs.map(l => l.entityId);
+    }
+
     const requests = await prisma.salaryIncrementRequest.findMany({
       where: {
-        status: 'ManagerApproved',
-        employee: {
-          user: {
-            organizationId: req.user.organizationId
-          }
-        }
+        employee: { user: { organizationId: req.user.organizationId } },
+        status: { in: ['Pending', 'ManagerApproved', 'Approved', 'Rejected'] }
       },
       include: {
         employee: {
@@ -254,9 +266,36 @@ exports.getHRIncrementRequests = async (req, res) => {
       },
       orderBy: { createdAt: 'desc' }
     });
-    res.json(requests);
+    const activeWorkflowLogs = await prisma.approvalLog.findMany({
+      where: {
+        entityId: { in: requests.map(r => r.id) },
+        entityType: 'SalaryIncrementRequest',
+        status: 'Pending'
+      },
+      include: {
+        approver: { include: { user: true } }
+      }
+    });
+
+    const pendingLogMap = {};
+    activeWorkflowLogs.forEach(l => {
+      pendingLogMap[l.entityId] = l;
+    });
+
+    const requestsWithRole = requests.map(req => {
+      let pendingRole = null;
+      if (req.status === 'Pending' && pendingLogMap[req.id]) {
+        pendingRole = pendingLogMap[req.id].approver?.user?.role;
+      }
+      return {
+        ...req,
+        pendingApproverRole: pendingRole
+      };
+    });
+
+    res.status(200).json({ success: true, data: requestsWithRole });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -280,12 +319,23 @@ exports.approveHRIncrementRequest = async (req, res) => {
       return res.status(400).json({ message: `Request status is ${request.status}, cannot approve.` });
     }
 
+    const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', req.user.organizationId);
+
+    let newStatus = 'Approved';
+
+    if (workflowActive) {
+      const result = await processApproval('SalaryIncrementRequest', id, req.user.userId, 'APPROVE', 'Approved by HR');
+      if (!result.finalized) {
+        newStatus = 'ManagerApproved'; // Intermediate
+      }
+    }
+
     const updated = await prisma.salaryIncrementRequest.update({
       where: { id },
-      data: { status: 'Approved' }
+      data: { status: newStatus }
     });
 
-    if (request.employeeId) {
+    if (newStatus === 'Approved' && request.employeeId) {
       await prisma.compensationProfile.update({
         where: { employeeId: request.employeeId },
         data: {
@@ -334,6 +384,12 @@ exports.rejectHRIncrementRequest = async (req, res) => {
     });
 
     if (!request) return res.status(404).json({ message: 'Increment request not found.' });
+
+    const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', req.user.organizationId);
+
+    if (workflowActive) {
+      await processApproval('SalaryIncrementRequest', id, req.user.userId, 'REJECT', 'Rejected by HR');
+    }
 
     const updated = await prisma.salaryIncrementRequest.update({
       where: { id },

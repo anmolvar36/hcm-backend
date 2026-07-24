@@ -7,7 +7,7 @@
 const prisma = require('../config/prisma');
 const { z } = require('zod');
 const bcrypt = require('bcryptjs');
-const { isWorkflowEnabled, processApproval } = require('../services/approval.service');
+const { isWorkflowEnabled, processApproval, startWorkflow } = require('../services/approval.service');
 
 // ─────────────────────────────────────────
 // 1. GET MY TEAM  →  GET /api/manager/team
@@ -87,10 +87,33 @@ const getTeamLeaves = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    const leavesWithAccess = leaves.map(leave => ({
-      ...leave,
-      canApprove: ['ADMIN', 'SUPERADMIN', 'HR'].includes(req.user.role) ? true : assignedLeaveIds.includes(leave.id)
-    }));
+    const activeWorkflowLogs = await prisma.approvalLog.findMany({
+      where: {
+        entityId: { in: leaves.map(r => r.id) },
+        entityType: 'LeaveRequest',
+        status: 'Pending'
+      },
+      include: {
+        approver: { include: { user: true } }
+      }
+    });
+
+    const pendingLogMap = {};
+    activeWorkflowLogs.forEach(l => {
+      pendingLogMap[l.entityId] = l;
+    });
+
+    const leavesWithAccess = leaves.map(leave => {
+      let pendingRole = null;
+      if (leave.status === 'Pending' && pendingLogMap[leave.id]) {
+        pendingRole = pendingLogMap[leave.id].approver?.user?.role;
+      }
+      return {
+        ...leave,
+        pendingApproverRole: pendingRole,
+        canApprove: ['ADMIN', 'SUPERADMIN', 'HR'].includes(req.user.role) ? true : assignedLeaveIds.includes(leave.id)
+      };
+    });
 
     return res.status(200).json({ success: true, data: leavesWithAccess });
   } catch (err) { next(err); }
@@ -774,17 +797,28 @@ const requestSalaryIncrement = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager.' });
     }
 
+    const orgId = req.user.organizationId || (await prisma.user.findUnique({ where: { id: req.user.userId } })).organizationId;
+    const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', orgId);
+
     const request = await prisma.salaryIncrementRequest.create({
       data: {
         employeeId: employee.id,
         requestedSalary,
         reason,
         effectiveDate: new Date(effectiveDate),
-        status: 'ManagerApproved' // Auto-approve manager's own request so it goes to HR
+        status: workflowActive ? 'Pending' : 'ManagerApproved' // Auto-approve if no workflow
       }
     });
 
-    return res.status(201).json({ success: true, data: request, message: 'Salary increment request created and sent to HR.' });
+    if (workflowActive) {
+      const log = await startWorkflow('SalaryIncrementRequest', request.id, orgId, req.user.userId);
+      await prisma.salaryIncrementRequest.update({
+        where: { id: request.id },
+        data: { workflowId: log.workflowId }
+      });
+    }
+
+    return res.status(201).json({ success: true, data: request, message: workflowActive ? 'Salary increment request submitted for workflow approval.' : 'Salary increment request created and sent to HR.' });
   } catch (err) { next(err); }
 };
 
@@ -793,11 +827,19 @@ const getIncrementRequests = async (req, res, next) => {
     const managerProfile = await prisma.employeeProfile.findUnique({ where: { userId: req.user.userId } });
     if (!managerProfile) return res.status(404).json({ success: false, message: 'Manager profile not found.' });
 
+    // Explicitly assigned via Approval Workflow Engine
+    const pendingApprovals = await prisma.approvalLog.findMany({
+      where: { approverId: managerProfile.id, status: 'Pending', entityType: 'SalaryIncrementRequest' },
+      select: { entityId: true }
+    });
+    const assignedIds = pendingApprovals.map(a => a.entityId);
+
     const requests = await prisma.salaryIncrementRequest.findMany({
       where: {
-        employee: {
-          managerId: managerProfile.id
-        }
+        OR: [
+          { employee: { managerId: managerProfile.id } },
+          { id: { in: assignedIds } }
+        ]
       },
       include: {
         employee: {
@@ -812,7 +854,35 @@ const getIncrementRequests = async (req, res, next) => {
       orderBy: { createdAt: 'desc' }
     });
 
-    return res.status(200).json({ success: true, data: requests });
+    const activeWorkflowLogs = await prisma.approvalLog.findMany({
+      where: {
+        entityId: { in: requests.map(r => r.id) },
+        entityType: 'SalaryIncrementRequest',
+        status: 'Pending'
+      },
+      include: {
+        approver: { include: { user: true } }
+      }
+    });
+
+    const pendingLogMap = {};
+    activeWorkflowLogs.forEach(l => {
+      pendingLogMap[l.entityId] = l;
+    });
+
+    const requestsWithAccess = requests.map(req => {
+      let pendingRole = null;
+      if (req.status === 'Pending' && pendingLogMap[req.id]) {
+        pendingRole = pendingLogMap[req.id].approver?.user?.role;
+      }
+      return {
+        ...req,
+        pendingApproverRole: pendingRole,
+        canApprove: req.workflowId ? assignedIds.includes(req.id) : (req.employee.managerId === managerProfile.id && req.status === 'Pending')
+      };
+    });
+
+    return res.status(200).json({ success: true, data: requestsWithAccess });
   } catch (err) { next(err); }
 };
 
@@ -828,17 +898,45 @@ const approveIncrementRequest = async (req, res, next) => {
     });
 
     if (!request) return res.status(404).json({ success: false, message: 'Increment request not found.' });
-    if (request.employee.managerId !== managerProfile.id) {
-      return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager.' });
+    let isAuthorized = request.employee.managerId === managerProfile.id;
+
+    if (!isAuthorized && request.workflowId) {
+      const assignedLog = await prisma.approvalLog.findFirst({
+        where: {
+          entityId: id,
+          entityType: 'SalaryIncrementRequest',
+          status: 'Pending',
+          approverId: managerProfile.id
+        }
+      });
+      if (assignedLog) isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager or designated approver.' });
     }
 
     if (request.status !== 'Pending') {
       return res.status(400).json({ success: false, message: `Request is already ${request.status.toLowerCase()}` });
     }
 
+    const orgId = req.user.organizationId || (await prisma.user.findUnique({ where: { id: req.user.userId } })).organizationId;
+    const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', orgId);
+
+    let newStatus = 'ManagerApproved';
+
+    if (workflowActive) {
+      const result = await processApproval('SalaryIncrementRequest', id, req.user.userId, 'APPROVE', 'Approved by manager via legacy route');
+      if (result.finalized) {
+        newStatus = 'Approved';
+      } else {
+        newStatus = 'ManagerApproved'; // intermediate
+      }
+    }
+
     const updatedRequest = await prisma.salaryIncrementRequest.update({
       where: { id },
-      data: { status: 'ManagerApproved' }
+      data: { status: newStatus }
     });
 
     // ── Notify the employee that their manager approved ──
@@ -847,7 +945,7 @@ const approveIncrementRequest = async (req, res, next) => {
       await createNotification({
         userId: request.employee.userId,
         title: 'Increment Approved by Manager',
-        message: `Your salary increment request has been approved by your manager and forwarded to HR for final review.`,
+        message: `Your salary increment request has been approved by your manager and forwarded for further review.`,
         type: 'SUCCESS',
         link: '/employee/compensation'
       });
@@ -855,7 +953,7 @@ const approveIncrementRequest = async (req, res, next) => {
       console.error('Failed to send manager approval notification:', notifErr);
     }
 
-    return res.status(200).json({ success: true, data: updatedRequest, message: 'Increment request approved by manager, pending HR review.' });
+    return res.status(200).json({ success: true, data: updatedRequest, message: 'Increment request approved by manager.' });
   } catch (err) { next(err); }
 };
 
@@ -871,12 +969,33 @@ const rejectIncrementRequest = async (req, res, next) => {
     });
 
     if (!request) return res.status(404).json({ success: false, message: 'Increment request not found.' });
-    if (request.employee.managerId !== managerProfile.id) {
-      return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager.' });
+    let isAuthorized = request.employee.managerId === managerProfile.id;
+
+    if (!isAuthorized && request.workflowId) {
+      const assignedLog = await prisma.approvalLog.findFirst({
+        where: {
+          entityId: id,
+          entityType: 'SalaryIncrementRequest',
+          status: 'Pending',
+          approverId: managerProfile.id
+        }
+      });
+      if (assignedLog) isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+      return res.status(403).json({ success: false, message: 'Unauthorized. You are not this employee\'s manager or designated approver.' });
     }
 
     if (request.status !== 'Pending') {
       return res.status(400).json({ success: false, message: `Request is already ${request.status.toLowerCase()}` });
+    }
+
+    const orgId = req.user.organizationId || (await prisma.user.findUnique({ where: { id: req.user.userId } })).organizationId;
+    const workflowActive = await isWorkflowEnabled('SalaryIncrementRequest', orgId);
+
+    if (workflowActive) {
+      await processApproval('SalaryIncrementRequest', id, req.user.userId, 'REJECT', 'Rejected by manager via legacy route');
     }
 
     const updatedRequest = await prisma.salaryIncrementRequest.update({

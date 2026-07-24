@@ -9,8 +9,15 @@ const getOriginalRequesterId = async (module, entityId) => {
     const record = await prisma.leaveRequest.findUnique({ where: { id: entityId }, select: { userId: true } });
     if (record) return record.userId;
   } else if (module === 'SalaryIncrementRequest') {
-    const record = await prisma.salaryIncrementRequest.findUnique({ where: { id: entityId }, select: { employee: { select: { userId: true } } } });
-    if (record && record.employee) return record.employee.userId;
+    const record = await prisma.salaryIncrementRequest.findUnique({ 
+      where: { id: entityId }, 
+      select: { employee: { select: { userId: true, manager: { select: { userId: true } } } } } 
+    });
+    if (record?.employee?.manager) {
+      return record.employee.manager.userId; // True requester is the manager initiating on behalf of employee
+    } else if (record?.employee) {
+      return record.employee.userId;
+    }
   }
   // Fallback for Phase 1 if the module isn't strictly defined
   throw new Error(`Could not determine original requester for module ${module}`);

@@ -900,7 +900,34 @@ const getAllLeaves = async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.status(200).json({ success: true, data: leaves });
+    const activeWorkflowLogs = await prisma.approvalLog.findMany({
+      where: {
+        entityId: { in: leaves.map(r => r.id) },
+        entityType: 'LeaveRequest',
+        status: 'Pending'
+      },
+      include: {
+        approver: { include: { user: true } }
+      }
+    });
+
+    const pendingLogMap = {};
+    activeWorkflowLogs.forEach(l => {
+      pendingLogMap[l.entityId] = l;
+    });
+
+    const leavesWithRole = leaves.map(req => {
+      let pendingRole = null;
+      if (req.status === 'Pending' && pendingLogMap[req.id]) {
+        pendingRole = pendingLogMap[req.id].approver?.user?.role;
+      }
+      return {
+        ...req,
+        pendingApproverRole: pendingRole
+      };
+    });
+
+    return res.status(200).json({ success: true, data: leavesWithRole });
   } catch (err) { next(err); }
 };
 

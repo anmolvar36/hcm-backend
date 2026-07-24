@@ -65,6 +65,25 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Serve uploaded static files
 const path = require('path');
+app.use((err, req, res, next) => {
+  const fs = require('fs');
+  fs.appendFileSync('error.log', `[${new Date().toISOString()}] ${req.method} ${req.url} - ${err.stack}\n`);
+  
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ success: false, error: { code: 'FILE_TOO_LARGE', message: 'File is too large' } });
+    }
+  }
+
+  const statusCode = err.statusCode || 500;
+  res.status(statusCode).json({
+    success: false,
+    error: {
+      code: err.code || 'INTERNAL_ERROR',
+      message: err.message || 'Internal Server Error'
+    }
+  });
+});
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // ---- HEALTH CHECK ----
