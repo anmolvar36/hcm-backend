@@ -46,51 +46,86 @@ function parseImportDate(dateInput) {
   
   // If it's already a Date object
   if (dateInput instanceof Date && !isNaN(dateInput.getTime())) {
-    return dateInput;
+    return new Date(dateInput.getFullYear(), dateInput.getMonth(), dateInput.getDate());
   }
   
   // If it's a number (Excel serial number)
   if (typeof dateInput === 'number') {
-    return new Date(Math.round((dateInput - 25569) * 86400 * 1000));
+    const d = new Date(Math.round((dateInput - 25569) * 86400 * 1000));
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
   
   // If it's a string, clean it
   let str = String(dateInput).trim();
   
-  // Try standard JS parsing first
-  let parsed = new Date(str);
-  if (!isNaN(parsed.getTime())) {
-    return parsed;
-  }
-  
   // Try parsing DD/MM/YYYY or DD-MM-YYYY
-  const dmYRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/;
+  const dmYRegex = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/;
   const match = str.match(dmYRegex);
   if (match) {
     const day = parseInt(match[1], 10);
     const month = parseInt(match[2], 10) - 1; // 0-based
     const year = parseInt(match[3], 10);
-    parsed = new Date(year, month, day);
-    if (!isNaN(parsed.getTime())) {
-      return parsed;
-    }
+    return new Date(year, month, day);
   }
 
   // Try parsing YYYY/MM/DD
-  const YmdRegex = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/;
+  const YmdRegex = /^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/;
   const matchY = str.match(YmdRegex);
   if (matchY) {
     const year = parseInt(matchY[1], 10);
     const month = parseInt(matchY[2], 10) - 1;
     const day = parseInt(matchY[3], 10);
-    parsed = new Date(year, month, day);
-    if (!isNaN(parsed.getTime())) {
-      return parsed;
-    }
+    return new Date(year, month, day);
   }
   
+  let parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  }
+
   // Fallback to today if all parsing fails
   return new Date();
+}
+
+function combineDateAndTime(baseDate, timeInput) {
+  if (!timeInput) return null;
+
+  const bDate = baseDate instanceof Date ? baseDate : new Date(baseDate);
+  const year = bDate.getFullYear();
+  const month = bDate.getMonth();
+  const day = bDate.getDate();
+
+  if (timeInput instanceof Date && !isNaN(timeInput.getTime())) {
+    return new Date(year, month, day, timeInput.getHours(), timeInput.getMinutes(), 0);
+  }
+
+  if (typeof timeInput === 'number') {
+    const totalMinutes = Math.round(timeInput * 24 * 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return new Date(year, month, day, hours, minutes, 0);
+  }
+
+  const str = String(timeInput).trim();
+  const timeRegex = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?/i;
+  const match = str.match(timeRegex);
+  if (match) {
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const ampm = match[4]?.toLowerCase();
+    
+    if (ampm === 'pm' && hours < 12) hours += 12;
+    if (ampm === 'am' && hours === 12) hours = 0;
+    if (!ampm && hours >= 1 && hours <= 6) hours += 12;
+
+    return new Date(year, month, day, hours, minutes, 0);
+  }
+
+  let parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    return new Date(year, month, day, parsed.getHours(), parsed.getMinutes(), 0);
+  }
+  return null;
 }
 
 /**
@@ -472,21 +507,33 @@ const executeImport = async (validData, entity, context) => {
             }
 
             const date = parseImportDate(row.date);
-            let clockIn = row.clockIn ? parseImportDate(row.clockIn) : date;
-            let clockOut = row.clockOut ? parseImportDate(row.clockOut) : null;
+            let clockIn = combineDateAndTime(date, row.clockIn) || date;
+            let clockOut = combineDateAndTime(date, row.clockOut);
             let totalWorkedMin = 0;
             
             if (clockIn && clockOut) {
-              totalWorkedMin = Math.round((clockOut.getTime() - clockIn.getTime()) / (1000 * 60));
+              totalWorkedMin = Math.max(0, Math.round((clockOut.getTime() - clockIn.getTime()) / (1000 * 60)));
             }
-            
+
+            const rawStatus = row.status ? String(row.status).trim().toLowerCase() : 'present';
+            let normStatus = 'Present';
+            if (rawStatus.includes('leave')) normStatus = 'Leave';
+            else if (rawStatus.includes('late')) normStatus = 'Late';
+            else if (rawStatus.includes('absent')) normStatus = 'Absent';
+            else if (rawStatus.includes('present')) normStatus = 'Present';
+
+            const rawMode = row.mode ? String(row.mode).trim().toLowerCase() : 'office';
+            let normMode = 'Office';
+            if (rawMode.includes('remote') || rawMode.includes('home')) normMode = 'Remote';
+            else if (rawMode.includes('field') || rawMode.includes('site')) normMode = 'On-Site';
+
             // Check for duplicates in the current batch
             const signature = `${employee.userId}_${date.toISOString()}`;
             if (processedSignatures.has(signature)) {
               continue;
             }
 
-            // Check for existing duplicates in the database
+            // Upsert or skip existing duplicates in database
             const existingAttendance = await prisma.attendanceLog.findFirst({
               where: {
                 userId: employee.userId,
@@ -495,6 +542,18 @@ const executeImport = async (validData, entity, context) => {
             });
 
             if (existingAttendance) {
+              await prisma.attendanceLog.update({
+                where: { id: existingAttendance.id },
+                data: {
+                  clockIn: clockIn || date,
+                  clockOut: clockOut,
+                  totalWorkedMin: totalWorkedMin,
+                  status: normStatus,
+                  mode: normMode
+                }
+              });
+              processedSignatures.add(signature);
+              totalInserted++;
               continue;
             }
 
@@ -506,8 +565,8 @@ const executeImport = async (validData, entity, context) => {
               clockIn: clockIn || date,
               clockOut: clockOut,
               totalWorkedMin: totalWorkedMin,
-              status: row.status || 'Present',
-              mode: row.mode || 'Office'
+              status: normStatus,
+              mode: normMode
             });
           } catch (e) {
             console.error(`Failed to process attendance row:`, e.message);
