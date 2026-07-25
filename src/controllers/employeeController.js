@@ -1020,7 +1020,7 @@ const submitResignation = async (req, res, next) => {
         employeeId: emp.id,
         exitType: 'RESIGNATION',
         status: {
-          notIn: ['COMPLETED', 'EMPLOYEE_RELIEVED']
+          notIn: ['COMPLETED', 'EMPLOYEE_RELIEVED', 'REJECTED_BY_MANAGER', 'REJECTED_BY_HR']
         }
       }
     });

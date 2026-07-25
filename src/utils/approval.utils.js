@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 
-async function findApproverInHierarchy(startUserId, conditionFn) {
+async function findApproverInHierarchy(startUserId, conditionFn, skipApproverIds = []) {
   let currentProfile = await prisma.employeeProfile.findUnique({
     where: { userId: startUserId },
     include: { user: { include: { customRole: true } } }
@@ -19,7 +19,7 @@ async function findApproverInHierarchy(startUserId, conditionFn) {
     
     if (!managerProfile) break;
     
-    if (conditionFn(managerProfile)) {
+    if (conditionFn(managerProfile) && !skipApproverIds.includes(managerProfile.id)) {
       return managerProfile.id;
     }
     currentProfile = managerProfile;
@@ -30,7 +30,7 @@ async function findApproverInHierarchy(startUserId, conditionFn) {
 /**
  * Resolves dynamic approvers into specific User/Employee profiles based on the step configuration.
  */
-const resolveApprover = async (step, requesterUserId, organizationId) => {
+const resolveApprover = async (step, requesterUserId, organizationId, previousApproverIds = []) => {
   // 1. Specific User
   if (step.approverType === 'SPECIFIC_USER') {
     const user = await prisma.user.findFirst({
@@ -47,7 +47,7 @@ const resolveApprover = async (step, requesterUserId, organizationId) => {
   if (step.approverType === 'CUSTOM_ROLE') {
     const approverId = await findApproverInHierarchy(requesterUserId, (profile) => {
       return profile.user?.customRole?.name?.toLowerCase() === step.approverRole.toLowerCase();
-    });
+    }, previousApproverIds);
     if (!approverId) {
       throw new Error(`No manager found in hierarchy with custom role ${step.approverRole}`);
     }
@@ -63,7 +63,7 @@ const resolveApprover = async (step, requesterUserId, organizationId) => {
       const hasManagerCustomRole = profile.user?.customRole?.name?.toLowerCase() === 'manager';
       
       return hasManagerBaseRole || hasManagerCustomRole;
-    });
+    }, previousApproverIds);
 
     // Fallback: if no formal MANAGER is found in the chain, just return the direct manager.
     if (!approverId) {

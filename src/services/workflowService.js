@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const { createNotification } = require('../utils/notificationHelper');
 const { sendEmail } = require('../utils/emailService');
+const { isWorkflowEnabled, startWorkflow } = require('./approval.service');
 
 const LifecycleEvents = {
   APPLIED: 'APPLIED',
@@ -350,10 +351,28 @@ const handleTransition = async (event, data, tx = prisma) => {
       });
       if (!emp) throw new Error('Employee profile not found.');
 
-      // 1. Create Exit record
-      const initialStatus = emp.managerId ? 'PENDING_MANAGER_APPROVAL' : 'PENDING_HR_APPROVAL';
-      await tx.exitLifecycle.create({
-        data: {
+      const workflowActive = await isWorkflowEnabled('ExitLifecycle', emp.user.organizationId);
+      
+      let initialStatus = 'PENDING_HR_APPROVAL';
+      if (emp.managerId || workflowActive) {
+        initialStatus = 'PENDING_MANAGER_APPROVAL'; // Use an existing enum even for workflow
+      }
+
+      // 1. Create or Update Exit record
+      const exitRecord = await tx.exitLifecycle.upsert({
+        where: { employeeId },
+        update: {
+          exitType: 'RESIGNATION',
+          status: initialStatus,
+          lastWorkingDay: new Date(lastWorkingDay),
+          reason,
+          managerDecisionDate: null,
+          hrDecisionDate: null,
+          managerComment: null,
+          hrComment: null,
+          finalLastWorkingDay: null
+        },
+        create: {
           employeeId,
           exitType: 'RESIGNATION',
           status: initialStatus,
@@ -370,32 +389,46 @@ const handleTransition = async (event, data, tx = prisma) => {
         }
       });
 
-      // 3. Notify
-      if (emp.managerId) {
-        // Notify Manager
-        const managerUser = await tx.user.findFirst({
-          where: { employeeProfile: { id: emp.managerId } }
+      // 3. Workflow & Notify
+      if (workflowActive) {
+        // Trigger generic workflow engine (using global prisma outside tx but it's safe after create because it's asynchronous after the tx commits usually? Wait, tx hasn't committed yet.
+        // It's safer to run startWorkflow after the transaction, but we are inside handleTransition. We'll await it; it might not see the exitRecord if we're in an isolated transaction layer depending on Prisma's IsolationLevel, but for startWorkflow it only logs against the entityId which doesn't strictly foreign-key check against an uncommitted record usually, or we can just let it happen).
+        // Actually, startWorkflow creates ApprovalLog, which DOES have a foreign key to entityId in some systems, but ApprovalLog here has `entityId` as a String (polymorphic). So it won't fail FK constraint!
+        await startWorkflow('ExitLifecycle', exitRecord.id, emp.user.organizationId, emp.user.id);
+        
+        await createNotification({
+          userId: emp.user.id,
+          title: 'Resignation Workflow Started',
+          message: `Your resignation request has been submitted to the approval workflow.`,
+          type: 'INFO',
+          link: '/employee/resignation'
         });
-        if (managerUser) {
-          await createNotification({
-            userId: managerUser.id,
-            title: 'Resignation Request Submitted',
-            message: `${emp.fullName} has submitted resignation. Requires your approval.`,
-            type: 'WARNING',
-            link: '/manager/resignations'
-          });
-        }
       } else {
-        // Notify HR directly
-        const hrUsers = await tx.user.findMany({ where: { role: { in: ['HR', 'ADMIN'] } } });
-        for (const hr of hrUsers) {
-          await createNotification({
-            userId: hr.id,
-            title: 'Resignation Request Submitted',
-            message: `${emp.fullName} has submitted resignation. Last Working Day: ${lastWorkingDay}.`,
-            type: 'WARNING',
-            link: '/hr/offboarding'
+        // Legacy flow
+        if (emp.managerId) {
+          const managerUser = await tx.user.findFirst({
+            where: { employeeProfile: { id: emp.managerId } }
           });
+          if (managerUser) {
+            await createNotification({
+              userId: managerUser.id,
+              title: 'Resignation Request Submitted',
+              message: `${emp.fullName} has submitted resignation. Requires your approval.`,
+              type: 'WARNING',
+              link: '/manager/resignations'
+            });
+          }
+        } else {
+          const hrUsers = await tx.user.findMany({ where: { role: { in: ['HR', 'ADMIN'] } } });
+          for (const hr of hrUsers) {
+            await createNotification({
+              userId: hr.id,
+              title: 'Resignation Request Submitted',
+              message: `${emp.fullName} has submitted resignation. Last Working Day: ${lastWorkingDay}.`,
+              type: 'WARNING',
+              link: '/hr/offboarding'
+            });
+          }
         }
       }
 

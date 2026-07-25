@@ -7,6 +7,7 @@
 const prisma = require('../config/prisma');
 const { z } = require('zod');
 const { sendEmail } = require('../utils/emailService');
+const { isWorkflowEnabled, processApproval } = require('../services/approval.service');
 
 // ─────────────────────────────────────────
 // JOB POSTS
@@ -787,10 +788,6 @@ const reviewResignationHr = async (req, res, next) => {
     const { status, hrComment, finalLastWorkingDay } = req.body;
     const exitId = req.params.id;
 
-    if (!['APPROVED', 'REJECTED_BY_HR'].includes(status)) {
-      return res.status(400).json({ success: false, error: { message: 'Invalid status for HR review.' } });
-    }
-
     const hrProfile = await prisma.employeeProfile.findUnique({
       where: { userId: req.user.userId }
     });
@@ -802,6 +799,41 @@ const reviewResignationHr = async (req, res, next) => {
 
     if (!exit) {
       return res.status(404).json({ success: false, error: { message: 'Resignation not found.' } });
+    }
+
+    const orgId = req.user.organizationId || (await prisma.user.findUnique({ where: { id: req.user.userId } })).organizationId;
+    const workflowActive = await isWorkflowEnabled('ExitLifecycle', orgId);
+
+    if (workflowActive) {
+      // DYNAMIC WORKFLOW INTERCEPT
+      const action = status === 'APPROVED' ? 'APPROVE' : 'REJECT';
+      const result = await processApproval('ExitLifecycle', exitId, req.user.userId, action, hrComment || '');
+      
+      let newStatus = exit.status;
+      if (result.finalized) {
+        newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED_BY_HR';
+      } else if (result.nextStepConfig && result.nextStepConfig.approverRole && result.nextStepConfig.approverRole.toUpperCase() === 'HR') {
+        newStatus = 'PENDING_HR_APPROVAL';
+      }
+
+      const updated = await prisma.exitLifecycle.update({
+        where: { id: exitId },
+        data: {
+          status: newStatus,
+          hrId: hrProfile ? hrProfile.id : req.user.userId,
+          hrComment,
+          hrDecisionDate: new Date(),
+          ...(finalLastWorkingDay && { finalLastWorkingDay: new Date(finalLastWorkingDay) }),
+          ...(action === 'APPROVE' && { lastWorkingDay: finalLastWorkingDay ? new Date(finalLastWorkingDay) : exit.lastWorkingDay }) // sync LWD
+        }
+      });
+
+      return res.status(200).json({ success: true, data: updated, message: 'Resignation HR review processed via workflow.' });
+    }
+
+    // LEGACY FLOW
+    if (!['APPROVED', 'REJECTED_BY_HR'].includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Invalid status for HR review.' } });
     }
 
     const updated = await prisma.exitLifecycle.update({

@@ -18,6 +18,14 @@ const getOriginalRequesterId = async (module, entityId) => {
     } else if (record?.employee) {
       return record.employee.userId;
     }
+  } else if (module === 'ExitLifecycle') {
+    const record = await prisma.exitLifecycle.findUnique({ 
+      where: { id: entityId }, 
+      select: { employee: { select: { userId: true } } } 
+    });
+    if (record?.employee) {
+      return record.employee.userId;
+    }
   }
   // Fallback for Phase 1 if the module isn't strictly defined
   throw new Error(`Could not determine original requester for module ${module}`);
@@ -149,7 +157,14 @@ const processApproval = async (module, entityId, approverUserId, action, comment
   if (nextStepConfig) {
     // We need the original requester userId to resolve context correctly through the hierarchy
     const originalRequesterId = await getOriginalRequesterId(module, entityId);
-    const nextApproverId = await resolveApprover(nextStepConfig, originalRequesterId, workflow.organizationId);
+    
+    // Fetch all previous approvers in this workflow instance to avoid assigning the same person twice
+    const previousLogs = await prisma.approvalLog.findMany({
+      where: { entityId, workflowId: workflow.id, entityType: module }
+    });
+    const previousApproverIds = previousLogs.map(l => l.approverId);
+
+    const nextApproverId = await resolveApprover(nextStepConfig, originalRequesterId, workflow.organizationId, previousApproverIds);
 
     const nextNextStepConfig = sortedSteps.find(s => s.sequence > nextStepConfig.sequence);
     const nextNextStepSeq = nextNextStepConfig ? nextNextStepConfig.sequence : null;
