@@ -445,10 +445,9 @@ const addManualAttendance = async (req, res, next) => {
 
     const { employeeProfileId, date, checkIn, checkOut, status, mode } = parsed.data;
 
-    // Get the employee profile to retrieve userId
     const employee = await prisma.employeeProfile.findUnique({
       where: { id: employeeProfileId },
-      select: { userId: true },
+      select: { userId: true, shiftId: true },
     });
     if (!employee) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Employee not found.' } });
@@ -466,6 +465,17 @@ const addManualAttendance = async (req, res, next) => {
       clockOutDate = new Date(date);
       clockOutDate.setHours(outHours, outMins, 0, 0);
       totalWorkedMin = Math.max(0, Math.round((clockOutDate - clockInDate) / 1000 / 60));
+
+      let shift = null;
+      if (employee.shiftId) {
+        shift = await prisma.shift.findUnique({ where: { id: employee.shiftId } });
+      } else {
+        shift = await prisma.shift.findFirst({ where: { isDefault: true } });
+      }
+
+      if (shift && totalWorkedMin > (shift.workingHoursMin / 2)) {
+        totalWorkedMin = Math.max(0, totalWorkedMin - shift.breakDurationMin);
+      }
     }
 
     const log = await prisma.attendanceLog.create({

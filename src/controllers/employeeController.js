@@ -202,6 +202,7 @@ const clockOut = async (req, res, next) => {
     let overtimeMinutes = 0;
     let breakMinutes = 0;
     let isHalfDay = false;
+    let finalWorkedMin = workedMin;
     
     const shift = activeLog.shift;
     
@@ -230,13 +231,17 @@ const clockOut = async (req, res, next) => {
       if (workedMin < (shift.workingHoursMin / 2)) {
         isHalfDay = true;
       }
+
+      if (workedMin > (shift.workingHoursMin / 2)) {
+        finalWorkedMin = Math.max(0, workedMin - breakMinutes);
+      }
     }
 
     const updated = await prisma.attendanceLog.update({
       where: { id: activeLog.id },
       data: { 
         clockOut: clockOutTime, 
-        totalWorkedMin: workedMin,
+        totalWorkedMin: finalWorkedMin,
         earlyExitMinutes,
         overtimeMinutes,
         breakMinutes,

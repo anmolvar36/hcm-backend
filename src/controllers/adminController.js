@@ -73,21 +73,62 @@ const buildOrganizationPayload = (body) => {
 // ─────────────────────────────────────────
 const getDashboardStats = async (req, res, next) => {
   try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     const [
       totalEmployees,
       totalDepartments,
       pendingLeaves,
       openTickets,
-      todayAttendance,
+      attendanceLogs,
+      leavesToday,
       unpaidPayslips,
+      recentActivities,
     ] = await Promise.all([
       prisma.employeeProfile.count(),
       prisma.department.count(),
       prisma.leaveRequest.count({ where: { status: 'PENDING' } }),
       prisma.supportTicket.count({ where: { status: 'OPEN' } }),
-      prisma.attendanceLog.count({ where: { date: { gte: (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })() } } }),
+      prisma.attendanceLog.findMany({ where: { date: { gte: today } } }),
+      prisma.leaveRequest.findMany({ 
+        where: { 
+          status: 'APPROVED', 
+          startDate: { lte: new Date() },
+          endDate: { gte: today }
+        }
+      }),
       prisma.payslip.count({ where: { status: 'Unpaid' } }),
+      prisma.auditLog.findMany({
+        take: 3,
+        orderBy: { createdAt: 'desc' },
+        include: { user: { select: { email: true } } }
+      })
     ]);
+
+    const presentCount = attendanceLogs.filter(a => a.status === 'Present').length;
+    const lateCount = attendanceLogs.filter(a => a.status === 'Late' || a.lateMinutes > 0).length;
+    const leaveCount = leavesToday.length;
+
+    const totalForAttendance = Math.max(totalEmployees, 1);
+    const presentPct = Math.round((presentCount / totalForAttendance) * 100);
+    const leavePct = Math.round((leaveCount / totalForAttendance) * 100);
+    const latePct = Math.round((lateCount / totalForAttendance) * 100);
+
+    const attendanceSummary = {
+      present: `${presentPct}%`,
+      onLeave: `${leavePct}%`,
+      lateAbsent: `${latePct}%`,
+    };
+
+    const formattedActivities = recentActivities.map(log => ({
+      text: log.action,
+      details: log.details,
+      time: log.createdAt,
+      user: log.user?.email || 'System'
+    }));
+
+    const organizationScore = Math.max(0, 100 - (pendingLeaves * 2) - (openTickets * 3) - unpaidPayslips);
 
     return res.status(200).json({
       success: true,
@@ -96,8 +137,11 @@ const getDashboardStats = async (req, res, next) => {
         totalDepartments,
         pendingLeaves,
         openTickets,
-        todayAttendance,
+        todayAttendance: presentCount,
         unpaidPayslips,
+        attendanceSummary,
+        recentActivities: formattedActivities,
+        organizationScore
       },
     });
   } catch (err) { next(err); }
@@ -1557,6 +1601,31 @@ const getAllAttendance = async (req, res, next) => {
 const addManualAttendance = async (req, res, next) => {
   try {
     const { userId, date, clockIn, clockOut, status, mode, totalWorkedMin } = req.body;
+    
+    let finalWorkedMin = totalWorkedMin || 0;
+    let breakMinutes = 0;
+
+    if (clockOut) {
+      const employee = await prisma.employeeProfile.findUnique({ 
+        where: { userId }, 
+        select: { shiftId: true } 
+      });
+      
+      let shift = null;
+      if (employee?.shiftId) {
+        shift = await prisma.shift.findUnique({ where: { id: employee.shiftId } });
+      } else {
+        shift = await prisma.shift.findFirst({ where: { isDefault: true } });
+      }
+
+      if (shift) {
+        breakMinutes = shift.breakDurationMin;
+        if (finalWorkedMin > (shift.workingHoursMin / 2)) {
+          finalWorkedMin = Math.max(0, finalWorkedMin - breakMinutes);
+        }
+      }
+    }
+
     const log = await prisma.attendanceLog.create({
       data: {
         userId,
@@ -1565,7 +1634,8 @@ const addManualAttendance = async (req, res, next) => {
         clockOut: clockOut ? new Date(clockOut) : null,
         status: status || 'Present',
         mode: mode || 'Office',
-        totalWorkedMin: totalWorkedMin || 0
+        totalWorkedMin: finalWorkedMin,
+        breakMinutes
       },
       include: { user: { include: { employeeProfile: true } } }
     });

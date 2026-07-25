@@ -20,6 +20,7 @@
     "jsonwebtoken": "^9.0.3",
     "mathjs": "^15.2.0",
     "multer": "^2.2.0",
+    "mysql2": "^3.23.1",
     "nodemailer": "^9.0.3",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "^4.4.3"
