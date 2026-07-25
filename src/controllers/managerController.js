@@ -1029,9 +1029,19 @@ const getResignations = async (req, res, next) => {
     });
     if (!managerProfile) return res.status(404).json({ success: false, error: { message: 'Manager profile not found.' } });
 
+    // Explicitly assigned via Approval Workflow Engine
+    const pendingApprovals = await prisma.approvalLog.findMany({
+      where: { approverId: managerProfile.id, status: 'Pending', entityType: 'ExitLifecycle' },
+      select: { entityId: true }
+    });
+    const assignedIds = pendingApprovals.map(a => a.entityId);
+
     const resignations = await prisma.exitLifecycle.findMany({
       where: {
-        employee: { managerId: managerProfile.id },
+        OR: [
+          { employee: { managerId: managerProfile.id } },
+          { id: { in: assignedIds } }
+        ],
         exitType: 'RESIGNATION'
       },
       include: {
@@ -1040,7 +1050,29 @@ const getResignations = async (req, res, next) => {
       orderBy: { submissionDate: 'desc' }
     });
 
-    return res.status(200).json({ success: true, data: resignations });
+    const resignationsWithCanApprove = await Promise.all(resignations.map(async (req) => {
+      const isAssigned = assignedIds.includes(req.id);
+      
+      let canApprove = false;
+      if (isAssigned) {
+        canApprove = true;
+      } else {
+        const anyPending = await prisma.approvalLog.findFirst({
+          where: { entityId: req.id, status: 'Pending', entityType: 'ExitLifecycle' }
+        });
+        
+        if (!anyPending) {
+          canApprove = req.status === 'PENDING_MANAGER_APPROVAL' && req.employee.managerId === managerProfile.id;
+        }
+      }
+
+      return {
+        ...req,
+        canApprove
+      };
+    }));
+
+    return res.status(200).json({ success: true, data: resignationsWithCanApprove });
   } catch (err) { next(err); }
 };
 
@@ -1049,10 +1081,6 @@ const reviewResignation = async (req, res, next) => {
   try {
     const { status, managerComment } = req.body;
     const exitId = req.params.id;
-
-    if (!['PENDING_HR_APPROVAL', 'REJECTED_BY_MANAGER'].includes(status)) {
-      return res.status(400).json({ success: false, error: { message: 'Invalid status for manager review.' } });
-    }
 
     const managerProfile = await prisma.employeeProfile.findUnique({
       where: { userId: req.user.userId }
@@ -1063,8 +1091,45 @@ const reviewResignation = async (req, res, next) => {
       include: { employee: true }
     });
 
-    if (!exit || exit.employee.managerId !== managerProfile.id) {
-      return res.status(404).json({ success: false, error: { message: 'Resignation not found or unauthorized.' } });
+    if (!exit) {
+      return res.status(404).json({ success: false, error: { message: 'Resignation not found.' } });
+    }
+
+    const orgId = req.user.organizationId || (await prisma.user.findUnique({ where: { id: req.user.userId } })).organizationId;
+    const workflowActive = await isWorkflowEnabled('ExitLifecycle', orgId);
+
+    if (workflowActive) {
+      // DYNAMIC WORKFLOW INTERCEPT
+      const action = status === 'PENDING_HR_APPROVAL' ? 'APPROVE' : 'REJECT';
+      const result = await processApproval('ExitLifecycle', exitId, req.user.userId, action, managerComment || '');
+      
+      let newStatus = exit.status;
+      if (result.finalized) {
+        newStatus = action === 'APPROVE' ? 'APPROVED' : 'REJECTED_BY_MANAGER';
+      } else if (result.nextStepConfig && result.nextStepConfig.approverRole && result.nextStepConfig.approverRole.toUpperCase() === 'HR') {
+        newStatus = 'PENDING_HR_APPROVAL';
+      }
+
+      const updated = await prisma.exitLifecycle.update({
+        where: { id: exitId },
+        data: {
+          status: newStatus,
+          managerId: managerProfile.id,
+          managerComment,
+          managerDecisionDate: new Date()
+        }
+      });
+
+      return res.status(200).json({ success: true, data: updated, message: 'Resignation reviewed via workflow successfully.' });
+    }
+
+    // LEGACY FLOW
+    if (!['PENDING_HR_APPROVAL', 'REJECTED_BY_MANAGER'].includes(status)) {
+      return res.status(400).json({ success: false, error: { message: 'Invalid status for manager review.' } });
+    }
+
+    if (exit.employee.managerId !== managerProfile.id) {
+      return res.status(403).json({ success: false, error: { message: 'Unauthorized. Not the direct manager.' } });
     }
 
     const updated = await prisma.exitLifecycle.update({
