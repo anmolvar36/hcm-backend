@@ -152,6 +152,29 @@ const previewImport = async (req, res, next) => {
       validRows = newValidRows;
     }
 
+    if (entity === 'candidates') {
+      const newValidRows = [];
+      const seenEmails = new Set();
+
+      for (let i = 0; i < validRows.length; i++) {
+        const row = validRows[i];
+        const email = String(row.email || '').trim().toLowerCase();
+
+        if (email && seenEmails.has(email)) {
+          invalidRows.push(row);
+          errors.push({
+            row: i + 2,
+            column: 'email',
+            error: `Duplicate candidate email in file: ${email}`
+          });
+          continue;
+        }
+        if (email) seenEmails.add(email);
+        newValidRows.push(row);
+      }
+      validRows = newValidRows;
+    }
+
     // 6. Check for duplicate payroll (by employee + month)
     if (entity === 'payroll') {
       const allEmployees = await prisma.employeeProfile.findMany({ include: { user: true } });

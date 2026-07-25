@@ -17,6 +17,30 @@ const validationRules = {
     email: { required: true, type: 'email' },
     department: { required: false, type: 'string' } // Will be foreign key validated later if needed
   },
+  candidates: {
+    fullName: { required: true, type: 'string' },
+    email: { required: true, type: 'email' }
+  },
+  benefits: {
+    name: { required: true, type: 'string' },
+    category: { required: true, type: 'string' },
+    contribution: { required: true, type: 'string' },
+    provider: { required: true, type: 'string' },
+    eligibility: { required: true, type: 'string' },
+    status: { required: true, type: 'string' }
+  },
+  leave: {
+    userId: { required: true, type: 'string' },
+    startDate: { required: true, type: 'string' }
+  },
+  attendance: {
+    userId: { required: true, type: 'string' },
+    date: { required: true, type: 'string' }
+  },
+  payroll: {
+    employeeId: { required: true, type: 'string' },
+    month: { required: true, type: 'string' }
+  },
   jobs: {
     title: { required: true, type: 'string' }
   }
@@ -46,12 +70,12 @@ const validateData = (mappedData, entity) => {
       const value = row[field];
 
       // Required check
-      if (rule.required && (!value || String(value).trim() === '')) {
+      if (rule.required && (value === undefined || value === null || String(value).trim() === '')) {
         isRowValid = false;
         errors.push({
           row: rowNumber,
           column: field,
-          error: 'Required field is missing'
+          error: `Required field '${field}' is missing or empty`
         });
       }
 

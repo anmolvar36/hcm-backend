@@ -343,13 +343,19 @@ const executeImport = async (validData, entity, context) => {
 
             const candidateData = {
               fullName: row.fullName || 'Unknown Candidate',
+              role: row.role ? row.role.toString().trim() : null,
               phone: row.phone ? row.phone.toString().trim() : null,
-              location: row.location,
-              expectedSalary: row.expectedSalary ? row.expectedSalary.toString() : null,
-              experience: row.experience ? row.experience.toString() : null,
-              skills: row.skills,
-              linkedin: row.linkedin,
-              portfolio: row.portfolio
+              location: row.location ? row.location.toString().trim() : null,
+              city: row.city ? row.city.toString().trim() : null,
+              country: row.country ? row.country.toString().trim() : null,
+              address: row.address ? row.address.toString().trim() : null,
+              expectedSalary: row.expectedSalary ? row.expectedSalary.toString().trim() : null,
+              currentSalary: row.currentSalary ? row.currentSalary.toString().trim() : null,
+              noticePeriod: row.noticePeriod ? row.noticePeriod.toString().trim() : null,
+              experience: row.experience ? row.experience.toString().trim() : null,
+              skills: row.skills ? row.skills.toString().trim() : null,
+              linkedin: row.linkedin ? row.linkedin.toString().trim() : null,
+              portfolio: row.portfolio ? row.portfolio.toString().trim() : null
             };
 
             if (!candidateProfile) {
@@ -366,34 +372,60 @@ const executeImport = async (validData, entity, context) => {
               });
             }
 
-            // Make sure they show up in the HR Pipeline by attaching them to a default job pool
-            let defaultJob = await prisma.jobPost.findFirst({
-              where: { title: 'General Talent Pool' }
-            });
-            
-            if (!defaultJob) {
-              defaultJob = await prisma.jobPost.create({
+            // Map status string to valid ApplicationStatus enum
+            const parseStatus = (st) => {
+              if (!st) return 'APPLIED';
+              const clean = String(st).trim().toUpperCase();
+              if (clean.includes('SHORTLIST')) return 'SHORTLISTED';
+              if (clean.includes('INTERVIEW')) return 'INTERVIEWING';
+              if (clean.includes('SCREEN')) return 'SCREENING';
+              if (clean.includes('OFFER')) return 'OFFERED';
+              if (clean.includes('HIRE')) return 'HIRED';
+              if (clean.includes('REJECT')) return 'REJECTED';
+              return 'APPLIED';
+            };
+            const appStatus = parseStatus(row.status);
+
+            // Make sure they show up in the HR Pipeline by attaching them to job post or default pool
+            let targetJob = null;
+            if (row.role) {
+              targetJob = await prisma.jobPost.findFirst({
+                where: { title: { equals: row.role.trim() } }
+              });
+            }
+            if (!targetJob) {
+              targetJob = await prisma.jobPost.findFirst({
+                where: { title: 'General Talent Pool' }
+              });
+            }
+            if (!targetJob) {
+              targetJob = await prisma.jobPost.create({
                 data: {
-                  title: 'General Talent Pool',
-                  description: 'Candidates imported into the system without a specific application.',
+                  title: row.role ? row.role.trim() : 'General Talent Pool',
+                  description: 'Candidates imported into the system.',
                   requirements: 'Varies',
                   department: 'All'
                 }
               });
             }
 
-            // Check if they already have an application to this default job
+            // Check if they already have an application to this job
             const existingApp = await prisma.jobApplication.findFirst({
-              where: { jobId: defaultJob.id, candidateId: candidateProfile.id }
+              where: { jobId: targetJob.id, candidateId: candidateProfile.id }
             });
 
             if (!existingApp) {
               await prisma.jobApplication.create({
                 data: {
-                  jobId: defaultJob.id,
+                  jobId: targetJob.id,
                   candidateId: candidateProfile.id,
-                  status: 'APPLIED'
+                  status: appStatus
                 }
+              });
+            } else {
+              await prisma.jobApplication.update({
+                where: { id: existingApp.id },
+                data: { status: appStatus }
               });
             }
             totalInserted++;
@@ -703,6 +735,46 @@ const executeImport = async (validData, entity, context) => {
             totalInserted++;
           } catch (err) {
             console.error(`Failed to import job row:`, err.message);
+          }
+        }
+      } else if (entity === 'benefits') {
+        for (const row of chunk) {
+          try {
+            if (!row.name) continue;
+
+            const name = String(row.name).trim();
+            const existingPlan = await prisma.benefitPlan.findFirst({
+              where: { name }
+            });
+
+            const rawContribution = row.contribution ? String(row.contribution).replace(/\$/g, '').trim() : '0.00';
+
+            const planData = {
+              name,
+              category: row.category ? String(row.category).trim() : 'Health Insurance',
+              provider: row.provider ? String(row.provider).trim() : 'Internal',
+              contribution: rawContribution || '0.00',
+              empContribution: 'Individual',
+              eligibility: row.eligibility ? String(row.eligibility).trim() : 'All Employees',
+              status: row.status ? String(row.status).trim() : 'Active',
+              description: row.description ? String(row.description).trim() : null,
+              autoEnroll: false,
+              organizationId: context.organizationId || null
+            };
+
+            if (existingPlan) {
+              await prisma.benefitPlan.update({
+                where: { id: existingPlan.id },
+                data: planData
+              });
+            } else {
+              await prisma.benefitPlan.create({
+                data: planData
+              });
+            }
+            totalInserted++;
+          } catch (err) {
+            console.error(`Failed to import benefit plan row:`, err.message);
           }
         }
       }

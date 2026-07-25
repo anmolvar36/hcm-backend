@@ -83,8 +83,8 @@ const schemas = {
     }
   },
   candidates: {
-    fields: ['fullName', 'email', 'phone', 'location', 'expectedSalary', 'experience', 'skills', 'linkedin', 'portfolio', 'status'],
-    templateHeaders: ['Full Name', 'Email Address', 'Phone Number', 'Location', 'Expected Salary', 'Experience (Years)', 'Skills', 'LinkedIn URL', 'Portfolio URL', 'Status'],
+    fields: ['fullName', 'email', 'phone', 'role', 'experience', 'expectedSalary', 'currentSalary', 'noticePeriod', 'location', 'city', 'country', 'address', 'skills', 'linkedin', 'portfolio', 'status'],
+    templateHeaders: ['Full Name', 'Email Address', 'Phone Number', 'Applied Role', 'Experience (Years)', 'Expected Salary', 'Current Salary', 'Notice Period', 'Location', 'City', 'Country', 'Address', 'Skills', 'LinkedIn URL', 'Portfolio URL', 'Status'],
     aliases: {
       'Full Name': 'fullName',
       'Name': 'fullName',
@@ -93,16 +93,27 @@ const schemas = {
       'E-mail': 'email',
       'Phone Number': 'phone',
       'Phone': 'phone',
-      'Location': 'location',
-      'Expected Salary': 'expectedSalary',
+      'Applied Role': 'role',
+      'Role': 'role',
+      'Position': 'role',
+      'Designation': 'role',
       'Experience (Years)': 'experience',
       'Experience': 'experience',
+      'Expected Salary': 'expectedSalary',
+      'Current Salary': 'currentSalary',
+      'Notice Period': 'noticePeriod',
+      'Location': 'location',
+      'City': 'city',
+      'Country': 'country',
+      'Address': 'address',
       'Skills': 'skills',
       'LinkedIn URL': 'linkedin',
       'LinkedIn': 'linkedin',
       'Portfolio URL': 'portfolio',
       'Portfolio': 'portfolio',
-      'Status': 'status'
+      'Status': 'status',
+      'Stage': 'status',
+      'Application Status': 'status'
     }
   },
   departments: {
@@ -212,8 +223,28 @@ const schemas = {
       'Job Description': 'description',
       'Description': 'description'
     }
+  },
+  benefits: {
+    fields: ['name', 'category', 'provider', 'contribution', 'eligibility', 'status', 'description'],
+    templateHeaders: ['Plan Name', 'Category', 'Provider', 'Contribution ($)', 'Eligibility', 'Status', 'Description'],
+    aliases: {
+      'Plan Name': 'name',
+      'Name': 'name',
+      'Benefit Plan': 'name',
+      'Category': 'category',
+      'Benefit Category': 'category',
+      'Provider': 'provider',
+      'Contribution ($)': 'contribution',
+      'Contribution ($/mo)': 'contribution',
+      'Contribution': 'contribution',
+      'Payment Contribution': 'contribution',
+      'Monthly Cost': 'contribution',
+      'Employer Contribution': 'contribution',
+      'Eligibility': 'eligibility',
+      'Status': 'status',
+      'Description': 'description'
+    }
   }
-  // Future entities (Candidates, Departments, etc.) can be added here
 };
 
 /**
