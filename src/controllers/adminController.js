@@ -544,9 +544,9 @@ const toggleUserActive = async (req, res, next) => {
 // PUT /api/admin/users/:id
 const updateUser = async (req, res, next) => {
   try {
-    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId, 
+    const { name, email, role, department, empType, status, phone, address, manager, shiftId, overtimePolicyId,
       salaryType, hourlyRate, departmentId, password, customRoleId } = req.body;
-      
+
     const existingUser = await prisma.user.findUnique({
       where: { id: req.params.id },
       include: { employeeProfile: true }
