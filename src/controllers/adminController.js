@@ -193,10 +193,50 @@ const updateOrganization = async (req, res, next) => {
 // ─────────────────────────────────────────
 
 // GET /api/admin/departments
+// ─────────────────────────────────────────
+// DEPARTMENT HIERARCHY UTILITIES
+// ─────────────────────────────────────────
+
+/**
+ * Validates that setting `proposedParentId` as the parent of `departmentId`
+ * does NOT create a circular hierarchy (e.g. A→B→C→A).
+ * Returns null if valid, or an error message string if circular.
+ */
+const validateNoCircularHierarchy = async (departmentId, proposedParentId) => {
+  if (!proposedParentId) return null; // null parent = root, always valid
+  if (proposedParentId === departmentId) return 'A department cannot be its own parent.';
+
+  let currentId = proposedParentId;
+  const visited = new Set();
+  const MAX_DEPTH = 50; // safety cap
+
+  for (let i = 0; i < MAX_DEPTH; i++) {
+    if (visited.has(currentId)) return 'Circular hierarchy detected.';
+    visited.add(currentId);
+
+    const dept = await prisma.department.findUnique({
+      where: { id: currentId },
+      select: { parentId: true },
+    });
+
+    if (!dept || !dept.parentId) return null; // reached root, no cycle
+    if (dept.parentId === departmentId) return 'Circular hierarchy detected. The proposed parent is a descendant of this department.';
+    currentId = dept.parentId;
+  }
+
+  return 'Department hierarchy is too deep (exceeds 50 levels).';
+};
+
+// ─────────────────────────────────────────
+// DEPARTMENT MANAGEMENT
+// ─────────────────────────────────────────
+
 const getDepartments = async (req, res, next) => {
   try {
     const departments = await prisma.department.findMany({
-      include: { _count: { select: { employees: true } } },
+      include: {
+        _count: { select: { employees: true, subDepartments: true } },
+      },
       orderBy: { name: 'asc' },
     });
     return res.status(200).json({ success: true, data: departments });
@@ -206,6 +246,7 @@ const getDepartments = async (req, res, next) => {
 const departmentSchema = z.object({
   name: z.string().trim().min(2, 'Department name must be at least 2 characters'),
   organizationId: z.string().uuid().optional(),
+  parentId: z.string().uuid().nullish(),
   code: z.string().trim().nullish(),
   head: z.string().trim().nullish(),
   parent: z.string().trim().nullish(),
@@ -239,18 +280,37 @@ const createDepartment = async (req, res, next) => {
       });
     }
 
+    // Resolve parentId and sync legacy parent string
+    let parentId = parsed.data.parentId || null;
+    let parentName = parsed.data.parent || 'Corporate';
+
+    if (parentId) {
+      const parentDept = await prisma.department.findUnique({
+        where: { id: parentId },
+        select: { name: true },
+      });
+      if (!parentDept) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_PARENT', message: 'The specified parent department does not exist.' },
+        });
+      }
+      parentName = parentDept.name;
+    }
+
     const dept = await prisma.department.create({
       data: {
         name: parsed.data.name,
         organizationId,
+        parentId,
         code: parsed.data.code || null,
         head: parsed.data.head || null,
-        parent: parsed.data.parent || 'Corporate',
+        parent: parentName,
         description: parsed.data.description || null,
         color: parsed.data.color || '#4f46e5',
         status: parsed.data.status || 'Active',
       },
-      include: { _count: { select: { employees: true } } },
+      include: { _count: { select: { employees: true, subDepartments: true } } },
     });
     return res.status(201).json({ success: true, data: dept, message: 'Department created.' });
   } catch (err) {
@@ -274,10 +334,34 @@ const updateDepartment = async (req, res, next) => {
       Object.entries(parsed.data).filter(([, value]) => value !== undefined)
     );
 
+    // If parentId is being changed, validate no circular hierarchy
+    if ('parentId' in data) {
+      const circularError = await validateNoCircularHierarchy(req.params.id, data.parentId);
+      if (circularError) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'CIRCULAR_HIERARCHY', message: circularError },
+        });
+      }
+
+      // Sync legacy parent string
+      if (data.parentId) {
+        const parentDept = await prisma.department.findUnique({
+          where: { id: data.parentId },
+          select: { name: true },
+        });
+        if (parentDept) {
+          data.parent = parentDept.name;
+        }
+      } else {
+        data.parent = 'Corporate';
+      }
+    }
+
     const dept = await prisma.department.update({
       where: { id: req.params.id },
       data,
-      include: { _count: { select: { employees: true } } },
+      include: { _count: { select: { employees: true, subDepartments: true } } },
     });
     return res.status(200).json({ success: true, data: dept, message: 'Department updated.' });
   } catch (err) { next(err); }
@@ -286,6 +370,30 @@ const updateDepartment = async (req, res, next) => {
 // DELETE /api/admin/departments/:id
 const deleteDepartment = async (req, res, next) => {
   try {
+    // Check for child departments
+    const childCount = await prisma.department.count({ where: { parentId: req.params.id } });
+    if (childCount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'HAS_CHILDREN',
+          message: `Cannot delete: This department has ${childCount} child department(s). Reassign or delete them first.`,
+        },
+      });
+    }
+
+    // Check for assigned employees
+    const employeeCount = await prisma.employeeProfile.count({ where: { departmentId: req.params.id } });
+    if (employeeCount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'HAS_EMPLOYEES',
+          message: `Cannot delete: ${employeeCount} employee(s) are assigned to this department. Reassign them first.`,
+        },
+      });
+    }
+
     await prisma.department.delete({ where: { id: req.params.id } });
     return res.status(200).json({ success: true, message: 'Department deleted.' });
   } catch (err) { next(err); }

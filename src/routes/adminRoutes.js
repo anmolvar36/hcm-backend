@@ -41,6 +41,8 @@ const {
   getOvertimePolicies, createOvertimePolicy, updateOvertimePolicy, deleteOvertimePolicy
 } = require('../controllers/overtimePolicyController');
 
+const { getOrgChart } = require('../controllers/orgChartController');
+
 // Only ADMIN, SUPERADMIN, and HR (for shared dashboards like Payroll Center)
 router.use(protect, authorize('ADMIN', 'SUPERADMIN', 'HR'));
 
@@ -57,6 +59,9 @@ router.get('/departments', getDepartments);
 router.post('/departments', createDepartment);
 router.put('/departments/:id', updateDepartment);
 router.delete('/departments/:id', deleteDepartment);
+
+// Organization Chart
+router.get('/org-chart', getOrgChart);
 
 // Users
 router.get('/users', getAllUsers);

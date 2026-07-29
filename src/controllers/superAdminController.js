@@ -805,6 +805,30 @@ const updatePlatformDepartment = async (req, res, next) => {
 
 const deletePlatformDepartment = async (req, res, next) => {
   try {
+    // Check for child departments
+    const childCount = await prisma.department.count({ where: { parentId: req.params.id } });
+    if (childCount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'HAS_CHILDREN',
+          message: `Cannot delete: This department has ${childCount} child department(s). Reassign or delete them first.`,
+        },
+      });
+    }
+
+    // Check for assigned employees
+    const employeeCount = await prisma.employeeProfile.count({ where: { departmentId: req.params.id } });
+    if (employeeCount > 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'HAS_EMPLOYEES',
+          message: `Cannot delete: ${employeeCount} employee(s) are assigned to this department. Reassign them first.`,
+        },
+      });
+    }
+
     await prisma.department.delete({ where: { id: req.params.id } });
     return res.status(200).json({ success: true, message: 'Department deleted successfully' });
   } catch (err) { next(err); }

@@ -206,6 +206,9 @@ model Department {
   code           String?
   head           String?
   parent         String?           @default("Corporate")
+  parentId       String?
+  parentDept     Department?       @relation("DepartmentHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  subDepartments Department[]      @relation("DepartmentHierarchy")
   description    String?           @db.Text
   color          String?           @default("#4f46e5")
   status         String?           @default("Active")
